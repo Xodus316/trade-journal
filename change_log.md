@@ -2,6 +2,14 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-04-30 16:06:56 PDT
+
+- Added CSV import support for an older spreadsheet format with no `Bot` column.
+- Older rows are treated as manual trades with `botOpened = false`.
+- Added support for tab-delimited spreadsheet exports in addition to comma-delimited CSV.
+- Added contract amount parsing for ratio-style option quantities like `1/-2/1`, using the first non-zero leg as the contract count.
+- Added `1`/`0`, `W`/`L`, and yes/no handling for imported Win/Loss cells.
+
 ## 2026-04-30 15:51:33 PDT
 
 - Added `Agents.md` with project overview, future-agent guidance, important paths, commands, and data-safety rules.
@@ -64,4 +72,3 @@ All notable changes to Trade Journal should be recorded here. Future agents must
 - Added dashboard equity curve, drawdown, calendar heatmap, and strategy/stock breakdowns.
 - Added import history, cleanup tools, saved views, dark mode, backup/restore groundwork, and LAN API URL resolution.
 - Verified realized P&L excludes open positions and uses the imported `Profit` value.
-

@@ -4,7 +4,7 @@ import type { ImportResult, TransactionInput } from '@trade-journal/shared';
 
 import { query } from './db.js';
 
-const expectedHeaders = [
+const currentHeaders = [
   'Date',
   'Expiration',
   'Close Date',
@@ -23,7 +23,35 @@ const expectedHeaders = [
   'Notes'
 ] as const;
 
+const legacyHeaders = [
+  'Date',
+  'Expiration',
+  'Close Date',
+  'Stock',
+  'Strategy',
+  'Strategy',
+  'Strikes',
+  'Amount',
+  'Opening Price',
+  'Closing Price',
+  'Fees',
+  'Profit',
+  'Win/Loss',
+  'Broker',
+  'Notes'
+] as const;
+
+type ImportFormat = 'current' | 'legacy';
+
+function detectDelimiter(text: string) {
+  const firstDataLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? '';
+  const tabs = (firstDataLine.match(/\t/g) ?? []).length;
+  const commas = (firstDataLine.match(/,/g) ?? []).length;
+  return tabs > commas ? '\t' : ',';
+}
+
 function parseCsv(text: string) {
+  const delimiter = detectDelimiter(text);
   const rows: string[][] = [];
   let currentField = '';
   let currentRow: string[] = [];
@@ -43,7 +71,7 @@ function parseCsv(text: string) {
       continue;
     }
 
-    if (character === ',' && !inQuotes) {
+    if (character === delimiter && !inQuotes) {
       currentRow.push(currentField);
       currentField = '';
       continue;
@@ -99,6 +127,21 @@ function toNumber(value: string | undefined) {
   return Number.isFinite(parsed) ? (isAccountingNegative ? -parsed : parsed) : Number.NaN;
 }
 
+function toContractAmount(value: string | undefined) {
+  const normalized = normalizeCell(value);
+  if (normalized.includes('/')) {
+    const legs = normalized
+      .split('/')
+      .map((leg) => Number(leg.trim()))
+      .filter((leg) => Number.isFinite(leg));
+    const firstLeg = legs.find((leg) => leg !== 0);
+
+    return firstLeg === undefined ? Number.NaN : Math.abs(firstLeg);
+  }
+
+  return toNumber(value);
+}
+
 function toBoolean(value: string | undefined) {
   const normalized = normalizeCell(value).toLowerCase();
   return ['true', 'yes', 'y', '1', 'checked'].includes(normalized);
@@ -124,16 +167,32 @@ function parseDateCell(value: string | undefined) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function validateHeaders(headers: string[]) {
+function matchesHeaders(headers: string[], expectedHeaders: readonly string[]) {
   return expectedHeaders.every((header, index) => {
     const actual = normalizeCell(headers[index]);
 
-    if (index === 14) {
+    if (expectedHeaders.length === currentHeaders.length && index === 14) {
       return actual === header || actual === '';
     }
 
     return actual === header;
   });
+}
+
+function getImportFormat(headers: string[]): ImportFormat | null {
+  if (matchesHeaders(headers, currentHeaders)) {
+    return 'current';
+  }
+
+  if (matchesHeaders(headers, legacyHeaders)) {
+    return 'legacy';
+  }
+
+  return null;
+}
+
+function validateHeaders(headers: string[]) {
+  return getImportFormat(headers) !== null;
 }
 
 function findHeaderRowIndex(rows: string[][]) {
@@ -156,6 +215,7 @@ function isNonTransactionRow(cells: string[]) {
     normalizeCell(cells[11]) ||
     normalizeCell(cells[12]) ||
     normalizeCell(cells[13]) ||
+    normalizeCell(cells[14]) ||
     normalizeCell(cells[15]);
 
   if (!hasDataShape) {
@@ -195,6 +255,20 @@ function inferWinLoss(profit: number | null) {
   return profit >= 0 ? 'Win' : 'Loss';
 }
 
+function parseWinLoss(value: string | null, profit: number | null) {
+  const normalized = (value ?? '').trim().toLowerCase();
+
+  if (['win', 'w', '1', 'true', 'yes'].includes(normalized)) {
+    return 'Win';
+  }
+
+  if (['loss', 'l', '0', 'false', 'no'].includes(normalized)) {
+    return 'Loss';
+  }
+
+  return inferWinLoss(profit);
+}
+
 async function removeExactDuplicateTransactions() {
   await query(`
     WITH ranked AS (
@@ -230,11 +304,11 @@ async function removeExactDuplicateTransactions() {
   `);
 }
 
-function mapRowToTransaction(cells: string[], rowNumber: number) {
+function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportFormat) {
   const dateOpened = parseDateCell(cells[0]);
   const expiration = parseDateCell(cells[1]);
   const closeDate = parseDateCell(cells[2]);
-  const contracts = toNumber(cells[7]);
+  const contracts = toContractAmount(cells[7]);
   const openingPrice = toNumber(cells[8]);
   const closingPrice = toNumber(cells[9]);
   const fees = toNumber(cells[10]);
@@ -290,10 +364,9 @@ function mapRowToTransaction(cells: string[], rowNumber: number) {
   }
 
   const profitValue = Number.isNaN(profit) ? null : profit;
-  const winLoss =
-    winLossCell === 'Win' || winLossCell === 'Loss'
-      ? winLossCell
-      : inferWinLoss(profitValue);
+  const winLoss = parseWinLoss(winLossCell, profitValue);
+  const botOpened = format === 'current' ? toBoolean(cells[14]) : false;
+  const notes = format === 'current' ? nullable(cells[15]) : nullable(cells[14]);
 
   return {
     transaction: {
@@ -312,7 +385,7 @@ function mapRowToTransaction(cells: string[], rowNumber: number) {
       profit: profitValue,
       winLoss,
       broker: nullable(cells[13]),
-      botOpened: toBoolean(cells[14]),
+      botOpened,
       tags: [],
       reviewNotes: null,
       lessonLearned: null,
@@ -320,7 +393,7 @@ function mapRowToTransaction(cells: string[], rowNumber: number) {
       profitTarget: null,
       stopLoss: null,
       maxRisk: null,
-      notes: nullable(cells[15])
+      notes
     } satisfies TransactionInput
   };
 }
@@ -334,6 +407,11 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
 
   const headerRowIndex = findHeaderRowIndex(rows);
   if (headerRowIndex === -1) {
+    throw new Error('The CSV headers do not match the expected Google Sheets export format.');
+  }
+
+  const importFormat = getImportFormat(rows[headerRowIndex]);
+  if (!importFormat) {
     throw new Error('The CSV headers do not match the expected Google Sheets export format.');
   }
 
@@ -358,7 +436,7 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
       continue;
     }
 
-    const mapped = mapRowToTransaction(row, rowNumber);
+    const mapped = mapRowToTransaction(row, rowNumber, importFormat);
 
     if ('error' in mapped) {
       if (mapped.error) {
