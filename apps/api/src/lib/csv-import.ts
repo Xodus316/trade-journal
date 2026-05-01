@@ -41,7 +41,24 @@ const legacyHeaders = [
   'Notes'
 ] as const;
 
-type ImportFormat = 'current' | 'legacy';
+const legacyNoFeesHeaders = [
+  'Date',
+  'Expiration',
+  'Close Date',
+  'Stock',
+  'Strategy',
+  'Strategy',
+  'Strikes',
+  'Amount',
+  'Opening Price',
+  'Closing Price',
+  'Profit',
+  'Win/Loss',
+  'Broker',
+  'Notes'
+] as const;
+
+type ImportFormat = 'current' | 'legacy' | 'legacyNoFees';
 
 function detectDelimiter(text: string) {
   const firstDataLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? '';
@@ -150,7 +167,7 @@ function toBoolean(value: string | undefined) {
 
 function parseDateCell(value: string | undefined) {
   const normalized = normalizeCell(value);
-  if (!normalized || normalized === '-') {
+  if (!normalized || normalized === '-' || normalized.toLowerCase() === 'x') {
     return null;
   }
 
@@ -192,6 +209,10 @@ function getImportFormat(headers: string[]): ImportFormat | null {
 
   if (matchesHeaders(headers, legacyHeaders)) {
     return 'legacy';
+  }
+
+  if (matchesHeaders(headers, legacyNoFeesHeaders)) {
+    return 'legacyNoFees';
   }
 
   return null;
@@ -321,9 +342,9 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
   const contracts = toContractAmount(cells[7]);
   const openingPrice = toNumber(cells[8]);
   const closingPrice = toNumber(cells[9]);
-  const fees = toNumber(cells[10]);
-  const profit = toNumber(cells[11]);
-  const winLossCell = nullable(cells[12]);
+  const fees = format === 'legacyNoFees' ? 0 : toNumber(cells[10]);
+  const profit = format === 'legacyNoFees' ? toNumber(cells[10]) : toNumber(cells[11]);
+  const winLossCell = nullable(format === 'legacyNoFees' ? cells[11] : cells[12]);
   const side = normalizeCell(cells[4]);
   const problems: string[] = [];
   const effectiveDateOpened = dateOpened ?? closeDate ?? expiration;
@@ -379,7 +400,8 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
   const profitValue = Number.isNaN(profit) ? null : profit;
   const winLoss = parseWinLoss(winLossCell, profitValue);
   const botOpened = format === 'current' ? toBoolean(cells[14]) : false;
-  const notes = format === 'current' ? nullable(cells[15]) : nullable(cells[14]);
+  const broker = format === 'legacyNoFees' ? nullable(cells[12]) : nullable(cells[13]);
+  const notes = format === 'current' ? nullable(cells[15]) : nullable(format === 'legacyNoFees' ? cells[13] : cells[14]);
 
   return {
     transaction: {
@@ -397,7 +419,7 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
       fees: Number.isNaN(fees) || fees === null ? 0 : fees,
       profit: profitValue,
       winLoss,
-      broker: nullable(cells[13]),
+      broker,
       botOpened,
       tags: [],
       reviewNotes: null,

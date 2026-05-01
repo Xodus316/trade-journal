@@ -2,6 +2,12 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-04-30 22:02:24 PDT
+
+- Added import support for older CSV exports that omit the `Fees` column.
+- Defaulted missing fees to `0` for no-fee legacy rows while preserving Profit, Win/Loss, Broker, and Notes mapping.
+- Treated `x` expiration markers as no expiration so futures rows can import.
+
 ## 2026-04-30 21:47:24 PDT
 
 - Normalized imported contract amounts to positive values, including plain negative numbers.
