@@ -2,6 +2,12 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-04-30 21:47:24 PDT
+
+- Normalized imported contract amounts to positive values, including plain negative numbers.
+- Treated blank or `-` open-date cells as ignorable placeholder rows when Win/Loss is empty.
+- Allowed completed rows with blank or `-` open dates to import by using the close date, then expiration date, as the trade date fallback.
+
 ## 2026-04-30 16:06:56 PDT
 
 - Added CSV import support for an older spreadsheet format with no `Bot` column.

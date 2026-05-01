@@ -139,7 +139,8 @@ function toContractAmount(value: string | undefined) {
     return firstLeg === undefined ? Number.NaN : Math.abs(firstLeg);
   }
 
-  return toNumber(value);
+  const parsed = toNumber(value);
+  return parsed === null || Number.isNaN(parsed) ? parsed : Math.abs(parsed);
 }
 
 function toBoolean(value: string | undefined) {
@@ -149,7 +150,7 @@ function toBoolean(value: string | undefined) {
 
 function parseDateCell(value: string | undefined) {
   const normalized = normalizeCell(value);
-  if (!normalized) {
+  if (!normalized || normalized === '-') {
     return null;
   }
 
@@ -165,6 +166,11 @@ function parseDateCell(value: string | undefined) {
   }
 
   return parsed.toISOString().slice(0, 10);
+}
+
+function isMissingDateMarker(value: string | undefined) {
+  const normalized = normalizeCell(value);
+  return !normalized || normalized === '-';
 }
 
 function matchesHeaders(headers: string[], expectedHeaders: readonly string[]) {
@@ -223,6 +229,10 @@ function isNonTransactionRow(cells: string[]) {
   }
 
   if (validateHeaders(cells)) {
+    return true;
+  }
+
+  if (isMissingDateMarker(cells[0]) && !normalizeCell(cells[12])) {
     return true;
   }
 
@@ -316,9 +326,12 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
   const winLossCell = nullable(cells[12]);
   const side = normalizeCell(cells[4]);
   const problems: string[] = [];
+  const effectiveDateOpened = dateOpened ?? closeDate ?? expiration;
 
   if (dateOpened === 'invalid') {
     problems.push('invalid open date');
+  } else if (!effectiveDateOpened) {
+    problems.push('missing open date');
   }
   if (expiration === 'invalid') {
     problems.push('invalid expiration date');
@@ -371,7 +384,7 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
   return {
     transaction: {
       positionGroup: null,
-      dateOpened: dateOpened as string,
+      dateOpened: effectiveDateOpened as string,
       expiration: expiration as string | null,
       closeDate: closeDate as string | null,
       stock: normalizeCell(cells[3]),
