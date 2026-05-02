@@ -58,7 +58,24 @@ const legacyNoFeesHeaders = [
   'Notes'
 ] as const;
 
-type ImportFormat = 'current' | 'legacy' | 'legacyNoFees';
+const brokerActivityHeaders = [
+  'Activity Date',
+  'Process Date',
+  'Settle Date',
+  'Instrument',
+  'Description',
+  'Trans Code',
+  'Quantity',
+  'Price',
+  'Amount'
+] as const;
+
+type ImportFormat = 'current' | 'legacy' | 'legacyNoFees' | 'brokerActivity';
+
+type MappedTransaction = {
+  transaction: TransactionInput;
+  originalRow: unknown;
+};
 
 function detectDelimiter(text: string) {
   const firstDataLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? '';
@@ -215,6 +232,10 @@ function getImportFormat(headers: string[]): ImportFormat | null {
     return 'legacyNoFees';
   }
 
+  if (matchesHeaders(headers, brokerActivityHeaders)) {
+    return 'brokerActivity';
+  }
+
   return null;
 }
 
@@ -298,6 +319,603 @@ function parseWinLoss(value: string | null, profit: number | null) {
   }
 
   return inferWinLoss(profit);
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function formatStrike(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+}
+
+function minDate(values: string[]) {
+  return values.reduce((minimum, value) => (value < minimum ? value : minimum));
+}
+
+function maxDate(values: string[]) {
+  return values.reduce((maximum, value) => (value > maximum ? value : maximum));
+}
+
+function parseBrokerQuantity(value: string | undefined) {
+  const normalized = normalizeCell(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const expirationSide: BrokerLotSide = normalized.toUpperCase().endsWith('S') ? 'Short' : 'Long';
+  const parsed = Number(normalized.replace(/[^\d.-]/g, ''));
+  if (!Number.isFinite(parsed)) {
+    return {
+      quantity: Number.NaN,
+      expirationSide
+    };
+  }
+
+  return {
+    quantity: Math.abs(parsed),
+    expirationSide
+  };
+}
+
+type BrokerOptionType = 'Call' | 'Put';
+type BrokerLotSide = 'Long' | 'Short';
+
+type BrokerOptionContract = {
+  stock: string;
+  expiration: string;
+  optionType: BrokerOptionType;
+  strike: number;
+};
+
+type BrokerActivityRow = {
+  rowNumber: number;
+  activityDate: string;
+  stock: string;
+  description: string;
+  code: string;
+  quantity: number;
+  expirationSide: BrokerLotSide;
+  amount: number;
+  raw: string[];
+};
+
+type BrokerOptionLot = BrokerOptionContract & {
+  side: BrokerLotSide;
+  openDate: string;
+  quantity: number;
+  remainingQuantity: number;
+  amount: number;
+  rowNumber: number;
+  openGroupKey: string;
+};
+
+type BrokerOptionMatch = BrokerOptionContract & {
+  side: BrokerLotSide;
+  openDate: string;
+  closeDate: string;
+  quantity: number;
+  openAmount: number;
+  closeAmount: number;
+  openRowNumber: number;
+  closeRowNumber: number;
+  openGroupKey: string;
+  closeGroupKey: string;
+};
+
+type BrokerStockLot = {
+  stock: string;
+  side: BrokerLotSide;
+  openDate: string;
+  quantity: number;
+  remainingQuantity: number;
+  amount: number;
+  rowNumber: number;
+  openGroupKey: string;
+};
+
+type BrokerStockMatch = {
+  stock: string;
+  side: BrokerLotSide;
+  openDate: string;
+  closeDate: string;
+  quantity: number;
+  openAmount: number;
+  closeAmount: number;
+  openRowNumber: number;
+  closeRowNumber: number;
+  openGroupKey: string;
+  closeGroupKey: string;
+};
+
+class UnionFind {
+  private readonly parents: number[];
+
+  constructor(size: number) {
+    this.parents = Array.from({ length: size }, (_, index) => index);
+  }
+
+  find(index: number): number {
+    const parent = this.parents[index];
+    if (parent === index) {
+      return index;
+    }
+
+    const root = this.find(parent);
+    this.parents[index] = root;
+    return root;
+  }
+
+  union(first: number, second: number) {
+    const firstRoot = this.find(first);
+    const secondRoot = this.find(second);
+    if (firstRoot !== secondRoot) {
+      this.parents[secondRoot] = firstRoot;
+    }
+  }
+}
+
+function parseBrokerOptionDescription(description: string, stockCell: string): BrokerOptionContract | null {
+  const normalized = description.replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(?:Option Expiration for )?(.+?) (\d{1,2}\/\d{1,2}\/\d{4}) (Call|Put) \$([\d,]+(?:\.\d+)?)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const [, descriptionStock, expirationCell, optionType, strikeCell] = match;
+  const expiration = parseDateCell(expirationCell);
+  const strike = Number(strikeCell.replace(/,/g, ''));
+  if (!expiration || expiration === 'invalid' || !Number.isFinite(strike)) {
+    return null;
+  }
+
+  return {
+    stock: normalizeCell(stockCell) || descriptionStock.trim().toUpperCase(),
+    expiration,
+    optionType: optionType.toLowerCase() === 'call' ? 'Call' : 'Put',
+    strike
+  };
+}
+
+function brokerOptionKey(contract: BrokerOptionContract) {
+  return `${contract.stock.toUpperCase()}|${contract.expiration}|${contract.optionType}|${formatStrike(contract.strike)}`;
+}
+
+function brokerOptionGroupKey(prefix: string, date: string, contract: BrokerOptionContract) {
+  return `${prefix}|${date}|${contract.stock.toUpperCase()}|${contract.expiration}`;
+}
+
+function brokerStockGroupKey(prefix: string, date: string, stock: string, side: BrokerLotSide) {
+  return `${prefix}|${date}|${stock.toUpperCase()}|${side}`;
+}
+
+function allocateAmount(totalAmount: number, matchedQuantity: number, totalQuantity: number) {
+  return totalQuantity === 0 ? 0 : (totalAmount * matchedQuantity) / totalQuantity;
+}
+
+function groupMatches<T extends { openGroupKey: string; closeGroupKey: string }>(matches: T[]) {
+  const unionFind = new UnionFind(matches.length);
+  const byOpenGroup = new Map<string, number>();
+  const byCloseGroup = new Map<string, number>();
+
+  matches.forEach((match, index) => {
+    const openIndex = byOpenGroup.get(match.openGroupKey);
+    if (openIndex === undefined) {
+      byOpenGroup.set(match.openGroupKey, index);
+    } else {
+      unionFind.union(openIndex, index);
+    }
+
+    const closeIndex = byCloseGroup.get(match.closeGroupKey);
+    if (closeIndex === undefined) {
+      byCloseGroup.set(match.closeGroupKey, index);
+    } else {
+      unionFind.union(closeIndex, index);
+    }
+  });
+
+  const groups = new Map<number, T[]>();
+  matches.forEach((match, index) => {
+    const root = unionFind.find(index);
+    groups.set(root, [...(groups.get(root) ?? []), match]);
+  });
+
+  return [...groups.values()];
+}
+
+function inferOptionStrategy(matches: BrokerOptionMatch[]) {
+  const uniqueLegs = new Map<string, BrokerOptionMatch>();
+  for (const match of matches) {
+    uniqueLegs.set(`${match.optionType}|${formatStrike(match.strike)}|${match.side}`, match);
+  }
+
+  const legs = [...uniqueLegs.values()];
+  const optionTypes = new Set(legs.map((leg) => leg.optionType));
+  const strikes = new Set(legs.map((leg) => formatStrike(leg.strike)));
+
+  if (legs.length === 1) {
+    return legs[0].optionType;
+  }
+
+  if (legs.length === 2) {
+    if (optionTypes.size === 1) {
+      return `${legs[0].optionType} Vertical`;
+    }
+
+    return strikes.size === 1 ? 'Straddle' : 'Strangle';
+  }
+
+  if (legs.length === 3 && optionTypes.size === 1) {
+    return 'Butterfly';
+  }
+
+  if (legs.length === 4 && optionTypes.size === 2) {
+    return strikes.size === 3 ? 'Iron Fly' : 'Iron Condor';
+  }
+
+  return 'Option Combo';
+}
+
+function buildOptionStrikes(matches: BrokerOptionMatch[]) {
+  const uniqueLegs = new Map<string, BrokerOptionMatch>();
+  for (const match of matches) {
+    uniqueLegs.set(`${match.optionType}|${formatStrike(match.strike)}|${match.side}`, match);
+  }
+
+  return [...uniqueLegs.values()]
+    .sort((first, second) => {
+      if (first.optionType !== second.optionType) {
+        return first.optionType === 'Call' ? -1 : 1;
+      }
+
+      if (first.side !== second.side) {
+        return first.side === 'Short' ? -1 : 1;
+      }
+
+      return second.strike - first.strike;
+    })
+    .map((leg) => `${formatStrike(leg.strike)}${leg.optionType === 'Call' ? 'c' : 'p'}`)
+    .join('/');
+}
+
+function getContractCount(quantities: number[]) {
+  const positiveQuantities = quantities.filter((quantity) => Number.isFinite(quantity) && quantity > 0);
+  return positiveQuantities.length > 0 ? Math.min(...positiveQuantities) : 1;
+}
+
+function makeBaseTransaction(input: {
+  positionGroup: string | null;
+  dateOpened: string;
+  expiration: string | null;
+  closeDate: string | null;
+  stock: string;
+  positionSide: 'Long' | 'Short';
+  strategyType: string;
+  strikes: string | null;
+  contracts: number;
+  openingPrice: number;
+  closingPrice: number;
+  profit: number;
+  notes: string;
+}): TransactionInput {
+  return {
+    positionGroup: input.positionGroup,
+    dateOpened: input.dateOpened,
+    expiration: input.expiration,
+    closeDate: input.closeDate,
+    stock: input.stock,
+    positionSide: input.positionSide,
+    strategyType: input.strategyType,
+    strikes: input.strikes,
+    contracts: input.contracts,
+    openingPrice: roundCurrency(input.openingPrice),
+    closingPrice: roundCurrency(input.closingPrice),
+    fees: 0,
+    profit: roundCurrency(input.profit),
+    winLoss: inferWinLoss(input.profit),
+    broker: 'Robinhood',
+    botOpened: false,
+    tags: [],
+    reviewNotes: null,
+    lessonLearned: null,
+    exitReason: null,
+    profitTarget: null,
+    stopLoss: null,
+    maxRisk: null,
+    notes: input.notes
+  };
+}
+
+function parseBrokerActivityRows(rows: string[][], headerRowIndex: number, errors: ImportResult['errors']) {
+  const activityRows: BrokerActivityRow[] = [];
+  const ignoredCodes = new Set(['ACH', 'CDIV', 'GOLD', 'MINT', 'MRGS', 'OASGN', 'OCA', 'REC', 'REORG', 'SPL']);
+  const supportedCodes = new Set(['BTO', 'STC', 'STO', 'BTC', 'OEXP', 'Buy', 'Sell']);
+
+  for (const [rowIndex, row] of rows.entries()) {
+    const rowNumber = headerRowIndex + rowIndex + 2;
+    const code = normalizeCell(row[5]);
+    if (!code || ignoredCodes.has(code)) {
+      continue;
+    }
+
+    if (!supportedCodes.has(code)) {
+      continue;
+    }
+
+    const activityDate = parseDateCell(row[0]);
+    const quantity = parseBrokerQuantity(row[6]);
+    const amount = code === 'OEXP' ? 0 : toNumber(row[8]);
+
+    const problems: string[] = [];
+    if (!activityDate || activityDate === 'invalid') {
+      problems.push('invalid activity date');
+    }
+    if (!quantity || Number.isNaN(quantity.quantity) || quantity.quantity <= 0) {
+      problems.push('invalid quantity');
+    }
+    if (amount === null || Number.isNaN(amount)) {
+      problems.push('invalid amount');
+    }
+
+    if (problems.length > 0) {
+      errors.push({ rowNumber, message: problems.join(', ') });
+      continue;
+    }
+
+    const parsedQuantity = quantity as { quantity: number; expirationSide: BrokerLotSide };
+
+    activityRows.push({
+      rowNumber,
+      activityDate: activityDate as string,
+      stock: normalizeCell(row[3]),
+      description: normalizeCell(row[4]),
+      code,
+      quantity: parsedQuantity.quantity,
+      expirationSide: parsedQuantity.expirationSide,
+      amount: amount as number,
+      raw: row
+    });
+  }
+
+  return activityRows.sort((first, second) => {
+    const dateCompare = first.activityDate.localeCompare(second.activityDate);
+    if (dateCompare !== 0) {
+      return dateCompare;
+    }
+
+    return second.rowNumber - first.rowNumber;
+  });
+}
+
+function matchBrokerOptionRows(activityRows: BrokerActivityRow[], errors: ImportResult['errors']) {
+  const openLots = new Map<string, BrokerOptionLot[]>();
+  const matches: BrokerOptionMatch[] = [];
+
+  for (const row of activityRows) {
+    if (!['BTO', 'STC', 'STO', 'BTC', 'OEXP'].includes(row.code)) {
+      continue;
+    }
+
+    const contract = parseBrokerOptionDescription(row.description, row.stock);
+    if (!contract) {
+      errors.push({ rowNumber: row.rowNumber, message: 'could not parse option description' });
+      continue;
+    }
+
+    const key = brokerOptionKey(contract);
+    const openGroupKey = brokerOptionGroupKey('open', row.activityDate, contract);
+
+    if (row.code === 'BTO' || row.code === 'STO') {
+      const lot: BrokerOptionLot = {
+        ...contract,
+        side: row.code === 'BTO' ? 'Long' : 'Short',
+        openDate: row.activityDate,
+        quantity: row.quantity,
+        remainingQuantity: row.quantity,
+        amount: row.amount,
+        rowNumber: row.rowNumber,
+        openGroupKey
+      };
+      openLots.set(key, [...(openLots.get(key) ?? []), lot]);
+      continue;
+    }
+
+    const closingSide: BrokerLotSide =
+      row.code === 'OEXP' ? row.expirationSide : row.code === 'STC' ? 'Long' : 'Short';
+    const lots = openLots.get(key) ?? [];
+    let remainingCloseQuantity = row.quantity;
+
+    for (const lot of lots) {
+      if (remainingCloseQuantity <= 0) {
+        break;
+      }
+
+      if (lot.side !== closingSide || lot.remainingQuantity <= 0) {
+        continue;
+      }
+
+      const matchedQuantity = Math.min(lot.remainingQuantity, remainingCloseQuantity);
+      lot.remainingQuantity -= matchedQuantity;
+      remainingCloseQuantity -= matchedQuantity;
+
+      matches.push({
+        ...contract,
+        side: lot.side,
+        openDate: lot.openDate,
+        closeDate: row.activityDate,
+        quantity: matchedQuantity,
+        openAmount: allocateAmount(lot.amount, matchedQuantity, lot.quantity),
+        closeAmount: row.code === 'OEXP' ? 0 : allocateAmount(row.amount, matchedQuantity, row.quantity),
+        openRowNumber: lot.rowNumber,
+        closeRowNumber: row.rowNumber,
+        openGroupKey: lot.openGroupKey,
+        closeGroupKey: brokerOptionGroupKey('close', row.activityDate, contract)
+      });
+    }
+  }
+
+  return matches;
+}
+
+function matchBrokerStockRows(activityRows: BrokerActivityRow[]) {
+  const openLots = new Map<string, BrokerStockLot[]>();
+  const matches: BrokerStockMatch[] = [];
+
+  for (const row of activityRows) {
+    if (row.code !== 'Buy' && row.code !== 'Sell') {
+      continue;
+    }
+
+    const stock = row.stock.toUpperCase();
+    if (!stock) {
+      continue;
+    }
+
+    const lots = openLots.get(stock) ?? [];
+    const closingSide: BrokerLotSide = row.code === 'Sell' ? 'Long' : 'Short';
+    const openingSide: BrokerLotSide = row.code === 'Buy' ? 'Long' : 'Short';
+    let remainingQuantity = row.quantity;
+
+    for (const lot of lots) {
+      if (remainingQuantity <= 0) {
+        break;
+      }
+
+      if (lot.side !== closingSide || lot.remainingQuantity <= 0) {
+        continue;
+      }
+
+      const matchedQuantity = Math.min(lot.remainingQuantity, remainingQuantity);
+      lot.remainingQuantity -= matchedQuantity;
+      remainingQuantity -= matchedQuantity;
+
+      matches.push({
+        stock,
+        side: lot.side,
+        openDate: lot.openDate,
+        closeDate: row.activityDate,
+        quantity: matchedQuantity,
+        openAmount: allocateAmount(lot.amount, matchedQuantity, lot.quantity),
+        closeAmount: allocateAmount(row.amount, matchedQuantity, row.quantity),
+        openRowNumber: lot.rowNumber,
+        closeRowNumber: row.rowNumber,
+        openGroupKey: lot.openGroupKey,
+        closeGroupKey: brokerStockGroupKey('close', row.activityDate, stock, lot.side)
+      });
+    }
+
+    if (remainingQuantity > 0) {
+      const lot: BrokerStockLot = {
+        stock,
+        side: openingSide,
+        openDate: row.activityDate,
+        quantity: remainingQuantity,
+        remainingQuantity,
+        amount: allocateAmount(row.amount, remainingQuantity, row.quantity),
+        rowNumber: row.rowNumber,
+        openGroupKey: brokerStockGroupKey('open', row.activityDate, stock, openingSide)
+      };
+      openLots.set(stock, [...lots, lot]);
+    }
+  }
+
+  return matches;
+}
+
+function optionMatchesToTransactions(matches: BrokerOptionMatch[]): MappedTransaction[] {
+  return groupMatches(matches).map((group) => {
+    const openingPrice = group.reduce((sum, match) => sum + match.openAmount, 0);
+    const closingPrice = group.reduce((sum, match) => sum + match.closeAmount, 0);
+    const profit = openingPrice + closingPrice;
+    const uniqueExpirations = new Set(group.map((match) => match.expiration));
+    const openDates = group.map((match) => match.openDate);
+    const closeDates = group.map((match) => match.closeDate);
+    const legQuantities = new Map<string, number>();
+
+    for (const match of group) {
+      const key = `${match.optionType}|${formatStrike(match.strike)}|${match.side}`;
+      legQuantities.set(key, (legQuantities.get(key) ?? 0) + match.quantity);
+    }
+
+    const first = group[0];
+    const rowNumbers = [...new Set(group.flatMap((match) => [match.openRowNumber, match.closeRowNumber]))].sort(
+      (firstRow, secondRow) => firstRow - secondRow
+    );
+
+    const transaction = makeBaseTransaction({
+      positionGroup: `broker:${first.stock}:${minDate(openDates)}:${maxDate(closeDates)}:${buildOptionStrikes(group)}`,
+      dateOpened: minDate(openDates),
+      expiration: uniqueExpirations.size === 1 ? first.expiration : null,
+      closeDate: maxDate(closeDates),
+      stock: first.stock,
+      positionSide: openingPrice >= 0 ? 'Short' : 'Long',
+      strategyType: inferOptionStrategy(group),
+      strikes: buildOptionStrikes(group),
+      contracts: getContractCount([...legQuantities.values()]),
+      openingPrice,
+      closingPrice,
+      profit,
+      notes: `Generated from broker activity rows ${rowNumbers.join(', ')}`
+    });
+
+    return {
+      transaction,
+      originalRow: {
+        type: 'broker-option-match',
+        rowNumbers,
+        legs: group
+      }
+    };
+  });
+}
+
+function stockMatchesToTransactions(matches: BrokerStockMatch[]): MappedTransaction[] {
+  return groupMatches(matches).map((group) => {
+    const openingPrice = group.reduce((sum, match) => sum + match.openAmount, 0);
+    const closingPrice = group.reduce((sum, match) => sum + match.closeAmount, 0);
+    const profit = openingPrice + closingPrice;
+    const openDates = group.map((match) => match.openDate);
+    const closeDates = group.map((match) => match.closeDate);
+    const first = group[0];
+    const rowNumbers = [...new Set(group.flatMap((match) => [match.openRowNumber, match.closeRowNumber]))].sort(
+      (firstRow, secondRow) => firstRow - secondRow
+    );
+
+    const transaction = makeBaseTransaction({
+      positionGroup: `broker:${first.stock}:${minDate(openDates)}:${maxDate(closeDates)}:stock`,
+      dateOpened: minDate(openDates),
+      expiration: null,
+      closeDate: maxDate(closeDates),
+      stock: first.stock,
+      positionSide: first.side,
+      strategyType: 'Stock',
+      strikes: null,
+      contracts: group.reduce((sum, match) => sum + match.quantity, 0),
+      openingPrice,
+      closingPrice,
+      profit,
+      notes: `Generated from broker stock activity rows ${rowNumbers.join(', ')}`
+    });
+
+    return {
+      transaction,
+      originalRow: {
+        type: 'broker-stock-match',
+        rowNumbers,
+        legs: group
+      }
+    };
+  });
+}
+
+function mapBrokerActivityToTransactions(rows: string[][], headerRowIndex: number, errors: ImportResult['errors']) {
+  const activityRows = parseBrokerActivityRows(rows, headerRowIndex, errors);
+  const optionMatches = matchBrokerOptionRows(activityRows, errors);
+  const stockMatches = matchBrokerStockRows(activityRows);
+
+  return [...optionMatchesToTransactions(optionMatches), ...stockMatchesToTransactions(stockMatches)].filter(
+    (mapped) => mapped.transaction.closeDate && mapped.transaction.profit !== null
+  );
 }
 
 async function removeExactDuplicateTransactions() {
@@ -433,6 +1051,170 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
   };
 }
 
+type ImportCounters = {
+  imported: number;
+  updated: number;
+  skippedDuplicates: number;
+};
+
+async function saveMappedTransaction(input: {
+  batchId: string;
+  sourceFileName: string;
+  mapped: MappedTransaction;
+  counters: ImportCounters;
+}) {
+  const { batchId, sourceFileName, mapped, counters } = input;
+  const sourceHash = hashRow(mapped.transaction);
+  const identity = stableTradeIdentity(mapped.transaction);
+  const existing = await query<{ id: string; source_row_hash: string }>(
+    `
+      SELECT id, source_row_hash
+      FROM transactions
+      WHERE
+        source_row_hash = $1
+        OR (
+          date_opened = $2
+          AND expiration IS NOT DISTINCT FROM $3::date
+          AND UPPER(stock) = $4
+          AND position_side = $5
+          AND LOWER(strategy_type) = $6
+          AND LOWER(COALESCE(strikes, '')) = COALESCE($7, '')
+          AND contracts = $8
+          AND opening_price IS NOT DISTINCT FROM $9::numeric
+          AND LOWER(COALESCE(broker, '')) = COALESCE($10, '')
+          AND bot_opened = $11
+          AND source_file_name IS NOT NULL
+        )
+      ORDER BY (source_row_hash = $1) DESC, manually_edited DESC, updated_at DESC, created_at DESC
+      LIMIT 1
+    `,
+    [
+      sourceHash,
+      mapped.transaction.dateOpened,
+      mapped.transaction.expiration,
+      identity.stock,
+      mapped.transaction.positionSide,
+      identity.strategyType,
+      identity.strikes,
+      mapped.transaction.contracts,
+      mapped.transaction.openingPrice,
+      identity.broker,
+      mapped.transaction.botOpened
+    ]
+  );
+
+  if (existing.rows[0]) {
+    const existingRow = existing.rows[0];
+    if (existingRow.source_row_hash === sourceHash) {
+      counters.skippedDuplicates += 1;
+      return;
+    }
+
+    await query(
+      `
+        UPDATE transactions
+        SET
+          import_batch_id = $2,
+          source_row_hash = $3,
+          source_file_name = $4,
+          original_row_json = $5::jsonb,
+          expiration = $6,
+          close_date = $7,
+          closing_price = $8,
+          fees = $9,
+          profit = $10,
+          win_loss = $11,
+          broker = $12,
+          bot_opened = $13,
+          notes = $14,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [
+        existingRow.id,
+        batchId,
+        sourceHash,
+        sourceFileName,
+        JSON.stringify(mapped.originalRow),
+        mapped.transaction.expiration,
+        mapped.transaction.closeDate,
+        mapped.transaction.closingPrice,
+        mapped.transaction.fees,
+        mapped.transaction.profit,
+        mapped.transaction.winLoss,
+        mapped.transaction.broker,
+        mapped.transaction.botOpened,
+        mapped.transaction.notes
+      ]
+    );
+    counters.updated += 1;
+    return;
+  }
+
+  const result = await query(
+    `
+      INSERT INTO transactions (
+        id,
+        import_batch_id,
+        source_row_hash,
+        source_file_name,
+        original_row_json,
+        date_opened,
+        expiration,
+        close_date,
+        stock,
+        position_side,
+        strategy_type,
+        strikes,
+        contracts,
+        opening_price,
+        closing_price,
+        fees,
+        profit,
+        win_loss,
+        broker,
+        bot_opened,
+        notes
+      )
+      VALUES (
+        $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17, $18, $19, $20, $21
+      )
+      ON CONFLICT (source_row_hash) DO NOTHING
+      RETURNING id
+    `,
+    [
+      randomUUID(),
+      batchId,
+      sourceHash,
+      sourceFileName,
+      JSON.stringify(mapped.originalRow),
+      mapped.transaction.dateOpened,
+      mapped.transaction.expiration,
+      mapped.transaction.closeDate,
+      mapped.transaction.stock,
+      mapped.transaction.positionSide,
+      mapped.transaction.strategyType,
+      mapped.transaction.strikes,
+      mapped.transaction.contracts,
+      mapped.transaction.openingPrice,
+      mapped.transaction.closingPrice,
+      mapped.transaction.fees,
+      mapped.transaction.profit,
+      mapped.transaction.winLoss,
+      mapped.transaction.broker,
+      mapped.transaction.botOpened,
+      mapped.transaction.notes
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    counters.skippedDuplicates += 1;
+  } else {
+    counters.imported += 1;
+  }
+}
+
 export async function importTransactionsCsv(sourceFileName: string, csvText: string): Promise<ImportResult> {
   const rows = parseCsv(csvText).filter((row) => row.some((cell) => normalizeCell(cell).length > 0));
 
@@ -453,9 +1235,11 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
   const dataRows = rows.slice(headerRowIndex + 1);
   const batchId = randomUUID();
   const errors: ImportResult['errors'] = [];
-  let imported = 0;
-  let updated = 0;
-  let skippedDuplicates = 0;
+  const counters: ImportCounters = {
+    imported: 0,
+    updated: 0,
+    skippedDuplicates: 0
+  };
 
   await query(
     `
@@ -465,169 +1249,36 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
     [batchId, sourceFileName]
   );
 
-  for (const [rowIndex, row] of dataRows.entries()) {
-    const rowNumber = headerRowIndex + rowIndex + 2;
-    if (isNonTransactionRow(row)) {
-      continue;
+  if (importFormat === 'brokerActivity') {
+    const mappedTransactions = mapBrokerActivityToTransactions(dataRows, headerRowIndex, errors);
+    for (const mapped of mappedTransactions) {
+      await saveMappedTransaction({ batchId, sourceFileName, mapped, counters });
     }
-
-    const mapped = mapRowToTransaction(row, rowNumber, importFormat);
-
-    if ('error' in mapped) {
-      if (mapped.error) {
-        errors.push(mapped.error);
-      }
-      continue;
-    }
-
-    const sourceHash = hashRow(mapped.transaction);
-    const identity = stableTradeIdentity(mapped.transaction);
-    const existing = await query<{ id: string; source_row_hash: string }>(
-      `
-        SELECT id, source_row_hash
-        FROM transactions
-        WHERE
-          source_row_hash = $1
-          OR (
-            date_opened = $2
-            AND expiration IS NOT DISTINCT FROM $3::date
-            AND UPPER(stock) = $4
-            AND position_side = $5
-            AND LOWER(strategy_type) = $6
-            AND LOWER(COALESCE(strikes, '')) = COALESCE($7, '')
-            AND contracts = $8
-            AND opening_price IS NOT DISTINCT FROM $9::numeric
-            AND LOWER(COALESCE(broker, '')) = COALESCE($10, '')
-            AND bot_opened = $11
-            AND source_file_name IS NOT NULL
-          )
-        ORDER BY (source_row_hash = $1) DESC, manually_edited DESC, updated_at DESC, created_at DESC
-        LIMIT 1
-      `,
-      [
-        sourceHash,
-        mapped.transaction.dateOpened,
-        mapped.transaction.expiration,
-        identity.stock,
-        mapped.transaction.positionSide,
-        identity.strategyType,
-        identity.strikes,
-        mapped.transaction.contracts,
-        mapped.transaction.openingPrice,
-        identity.broker,
-        mapped.transaction.botOpened
-      ]
-    );
-
-    if (existing.rows[0]) {
-      const existingRow = existing.rows[0];
-      if (existingRow.source_row_hash === sourceHash) {
-        skippedDuplicates += 1;
+  } else {
+    for (const [rowIndex, row] of dataRows.entries()) {
+      const rowNumber = headerRowIndex + rowIndex + 2;
+      if (isNonTransactionRow(row)) {
         continue;
       }
 
-      await query(
-        `
-          UPDATE transactions
-          SET
-            import_batch_id = $2,
-            source_row_hash = $3,
-            source_file_name = $4,
-            original_row_json = $5::jsonb,
-            expiration = $6,
-            close_date = $7,
-            closing_price = $8,
-            fees = $9,
-            profit = $10,
-            win_loss = $11,
-            broker = $12,
-            bot_opened = $13,
-            notes = $14,
-            updated_at = NOW()
-          WHERE id = $1
-        `,
-        [
-          existingRow.id,
-          batchId,
-          sourceHash,
-          sourceFileName,
-          JSON.stringify(row),
-          mapped.transaction.expiration,
-          mapped.transaction.closeDate,
-          mapped.transaction.closingPrice,
-          mapped.transaction.fees,
-          mapped.transaction.profit,
-          mapped.transaction.winLoss,
-          mapped.transaction.broker,
-          mapped.transaction.botOpened,
-          mapped.transaction.notes
-        ]
-      );
-      updated += 1;
-      continue;
-    }
+      const mapped = mapRowToTransaction(row, rowNumber, importFormat);
 
-    const result = await query(
-      `
-        INSERT INTO transactions (
-          id,
-          import_batch_id,
-          source_row_hash,
-          source_file_name,
-          original_row_json,
-          date_opened,
-          expiration,
-          close_date,
-          stock,
-          position_side,
-          strategy_type,
-          strikes,
-          contracts,
-          opening_price,
-          closing_price,
-          fees,
-          profit,
-          win_loss,
-          broker,
-          bot_opened,
-          notes
-        )
-        VALUES (
-          $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13,
-          $14, $15, $16, $17, $18, $19, $20, $21
-        )
-        ON CONFLICT (source_row_hash) DO NOTHING
-        RETURNING id
-      `,
-      [
-        randomUUID(),
+      if ('error' in mapped) {
+        if (mapped.error) {
+          errors.push(mapped.error);
+        }
+        continue;
+      }
+
+      await saveMappedTransaction({
         batchId,
-        sourceHash,
         sourceFileName,
-        JSON.stringify(row),
-        mapped.transaction.dateOpened,
-        mapped.transaction.expiration,
-        mapped.transaction.closeDate,
-        mapped.transaction.stock,
-        mapped.transaction.positionSide,
-        mapped.transaction.strategyType,
-        mapped.transaction.strikes,
-        mapped.transaction.contracts,
-        mapped.transaction.openingPrice,
-        mapped.transaction.closingPrice,
-        mapped.transaction.fees,
-        mapped.transaction.profit,
-        mapped.transaction.winLoss,
-        mapped.transaction.broker,
-        mapped.transaction.botOpened,
-        mapped.transaction.notes
-      ]
-    );
-
-    if (result.rowCount === 0) {
-      skippedDuplicates += 1;
-    } else {
-      imported += 1;
+        mapped: {
+          transaction: mapped.transaction,
+          originalRow: row
+        },
+        counters
+      });
     }
   }
 
@@ -637,7 +1288,7 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
       SET row_count = $2, error_count = $3
       WHERE id = $1
     `,
-    [batchId, imported + updated + skippedDuplicates, errors.length]
+    [batchId, counters.imported + counters.updated + counters.skippedDuplicates, errors.length]
   );
 
   await removeExactDuplicateTransactions();
@@ -645,9 +1296,9 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
   return {
     batchId,
     sourceFileName,
-    imported,
-    updated,
-    skippedDuplicates,
+    imported: counters.imported,
+    updated: counters.updated,
+    skippedDuplicates: counters.skippedDuplicates,
     errors
   };
 }

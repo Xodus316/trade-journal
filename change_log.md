@@ -2,6 +2,14 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-01 16:43:31 PDT
+
+- Added broker activity CSV import support for files with Activity Date, Instrument, Description, Trans Code, Quantity, Price, and Amount columns.
+- Added BTO/STC and STO/BTC option lot matching, including partial closes and grouped multi-leg trades.
+- Added automatic option strategy inference for calls, puts, verticals, butterflies, iron condors, iron flies, straddles, strangles, and generic option combos.
+- Added support for option expirations closing matched open lots at zero value.
+- Added closed stock Buy/Sell matching while ignoring unmatched open stock orders and non-trade activity such as fees, deposits, dividends, splits, reorganizations, assignments, and adjustments.
+
 ## 2026-04-30 22:02:24 PDT
 
 - Added import support for older CSV exports that omit the `Fees` column.
