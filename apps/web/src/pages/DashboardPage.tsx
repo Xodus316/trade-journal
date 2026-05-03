@@ -560,10 +560,10 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
                 </div>
               </section>
 
-              <section className="panel">
+              <section className="panel full-panel">
                 <SectionHeader title="Sizing review" subtitle="Performance by contract/share size" />
                 <TableShell empty={analytics.positionSizing.length === 0}>
-                  <table className="data-table">
+                  <table className="data-table sizing-table">
                     <thead>
                       <tr>
                         <th>Size</th>

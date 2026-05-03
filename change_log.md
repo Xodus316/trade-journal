@@ -2,6 +2,11 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-03 16:50:17 PDT
+
+- Fixed the Risk section Sizing Review card so it spans the dashboard width instead of being clipped in the narrow column.
+- Added sizing-table width and label wrapping rules to keep the sizing analysis readable on desktop and scrollable on smaller screens.
+
 ## 2026-05-03 16:30:06 PDT
 
 - Expanded analytics with rolling expectancy, strategy decay, best setup combinations, option DTE/expiration/spread/credit-debit/leg-count breakdowns, and position sizing analysis.

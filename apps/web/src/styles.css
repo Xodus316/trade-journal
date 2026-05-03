@@ -341,6 +341,16 @@ textarea {
   text-transform: uppercase;
 }
 
+.sizing-table {
+  min-width: 620px;
+}
+
+.sizing-table th:first-child,
+.sizing-table td:first-child {
+  white-space: normal;
+  min-width: 180px;
+}
+
 .table-link {
   padding: 0;
   border: 0;
