@@ -30,13 +30,9 @@ export function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Single-user trading journal</p>
+        <div className="brand-block">
+          <span className="brand-mark">TJ</span>
           <h1>Trade Journal</h1>
-          <p className="sidebar-copy">
-            Track stocks and options, separate open positions from realized performance,
-            and compare bot-driven trades with manual ones.
-          </p>
         </div>
 
         <nav className="nav-list" aria-label="Primary">

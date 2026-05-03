@@ -108,124 +108,127 @@ export function FilterBar({ filters, onChange }: FilterBarProps) {
           </button>
         ))}
       </div>
-      <div className="filter-bar">
-        <label>
-          <span>Saved view</span>
-          <select
-            value=""
-            onChange={(event) => {
-              const view = savedViews[event.target.value];
-              if (view) {
-                onChange(view);
+      <details className="filter-details">
+        <summary>Filters & saved views</summary>
+        <div className="filter-bar">
+          <label>
+            <span>Saved view</span>
+            <select
+              value=""
+              onChange={(event) => {
+                const view = savedViews[event.target.value];
+                if (view) {
+                  onChange(view);
+                }
+              }}
+            >
+              <option value="">Load view</option>
+              {Object.keys(savedViews).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>From</span>
+            <input
+              type="date"
+              value={filters.dateFrom ?? ''}
+              onChange={(event) => onChange(patchFilter(filters, { dateFrom: event.target.value || null }))}
+            />
+          </label>
+          <label>
+            <span>To</span>
+            <input
+              type="date"
+              value={filters.dateTo ?? ''}
+              onChange={(event) => onChange(patchFilter(filters, { dateTo: event.target.value || null }))}
+            />
+          </label>
+          <label>
+            <span>Stock</span>
+            <input
+              type="search"
+              value={filters.stock}
+              onChange={(event) => onChange(patchFilter(filters, { stock: event.target.value }))}
+              placeholder="/ES, SPX..."
+            />
+          </label>
+          <label>
+            <span>Strategy</span>
+            <input
+              type="search"
+              value={filters.strategyType}
+              onChange={(event) => onChange(patchFilter(filters, { strategyType: event.target.value }))}
+              placeholder="Put Vertical..."
+            />
+          </label>
+          <label>
+            <span>Side</span>
+            <select
+              value={filters.positionSide}
+              onChange={(event) =>
+                onChange(patchFilter(filters, { positionSide: event.target.value as AnalyticsFilters['positionSide'] }))
               }
-            }}
-          >
-            <option value="">Load view</option>
-            {Object.keys(savedViews).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>From</span>
-          <input
-            type="date"
-            value={filters.dateFrom ?? ''}
-            onChange={(event) => onChange(patchFilter(filters, { dateFrom: event.target.value || null }))}
-          />
-        </label>
-        <label>
-          <span>To</span>
-          <input
-            type="date"
-            value={filters.dateTo ?? ''}
-            onChange={(event) => onChange(patchFilter(filters, { dateTo: event.target.value || null }))}
-          />
-        </label>
-        <label>
-          <span>Stock</span>
-          <input
-            type="search"
-            value={filters.stock}
-            onChange={(event) => onChange(patchFilter(filters, { stock: event.target.value }))}
-            placeholder="/ES, SPX..."
-          />
-        </label>
-        <label>
-          <span>Strategy</span>
-          <input
-            type="search"
-            value={filters.strategyType}
-            onChange={(event) => onChange(patchFilter(filters, { strategyType: event.target.value }))}
-            placeholder="Put Vertical..."
-          />
-        </label>
-        <label>
-          <span>Side</span>
-          <select
-            value={filters.positionSide}
-            onChange={(event) =>
-              onChange(patchFilter(filters, { positionSide: event.target.value as AnalyticsFilters['positionSide'] }))
-            }
-          >
-            <option value="">All</option>
-            <option value="Long">Long</option>
-            <option value="Short">Short</option>
-          </select>
-        </label>
-        <label>
-          <span>Source</span>
-          <select
-            value={filters.botOpened}
-            onChange={(event) =>
-              onChange(patchFilter(filters, { botOpened: event.target.value as AnalyticsFilters['botOpened'] }))
-            }
-          >
-            <option value="all">All</option>
-            <option value="bot">Bot</option>
-            <option value="manual">Manual</option>
-          </select>
-        </label>
-        <label>
-          <span>Status</span>
-          <select
-            value={filters.status}
-            onChange={(event) =>
-              onChange(patchFilter(filters, { status: event.target.value as AnalyticsFilters['status'] }))
-            }
-          >
-            <option value="all">All</option>
-            <option value="closed">Closed</option>
-            <option value="open">Open</option>
-          </select>
-        </label>
-        <button className="ghost-button" onClick={() => onChange(defaultFilters)} type="button">
-          Reset
-        </button>
-        <label>
-          <span>View name</span>
-          <input value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="0DTE Bot" />
-        </label>
-        <button
-          className="ghost-button"
-          onClick={() => {
-            if (!viewName.trim()) {
-              return;
-            }
+            >
+              <option value="">All</option>
+              <option value="Long">Long</option>
+              <option value="Short">Short</option>
+            </select>
+          </label>
+          <label>
+            <span>Source</span>
+            <select
+              value={filters.botOpened}
+              onChange={(event) =>
+                onChange(patchFilter(filters, { botOpened: event.target.value as AnalyticsFilters['botOpened'] }))
+              }
+            >
+              <option value="all">All</option>
+              <option value="bot">Bot</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={filters.status}
+              onChange={(event) =>
+                onChange(patchFilter(filters, { status: event.target.value as AnalyticsFilters['status'] }))
+              }
+            >
+              <option value="all">All</option>
+              <option value="closed">Closed</option>
+              <option value="open">Open</option>
+            </select>
+          </label>
+          <button className="ghost-button" onClick={() => onChange(defaultFilters)} type="button">
+            Reset
+          </button>
+          <label>
+            <span>View name</span>
+            <input value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="0DTE Bot" />
+          </label>
+          <button
+            className="ghost-button"
+            onClick={() => {
+              if (!viewName.trim()) {
+                return;
+              }
 
-            saveViews({
-              ...savedViews,
-              [viewName.trim()]: filters
-            });
-            setViewName('');
-          }}
-          type="button"
-        >
-          Save View
-        </button>
-      </div>
+              saveViews({
+                ...savedViews,
+                [viewName.trim()]: filters
+              });
+              setViewName('');
+            }}
+            type="button"
+          >
+            Save View
+          </button>
+        </div>
+      </details>
     </section>
   );
 }

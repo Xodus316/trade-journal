@@ -2,6 +2,13 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-02 22:14:38 PDT
+
+- Split the dashboard into focused Overview, Performance, Breakdowns, Calendar, and Risk sections.
+- Reworked the dashboard summary, charts, tables, calendar heatmap, and risk panels for a less cluttered first view.
+- Collapsed detailed filters and saved views behind a disclosure control while keeping date presets visible.
+- Refreshed the dark UI shell with a quieter background, compact sidebar, clearer panels, scroll-safe tables, and responsive dashboard layouts.
+
 ## 2026-05-01 16:43:31 PDT
 
 - Added broker activity CSV import support for files with Activity Date, Instrument, Description, Trans Code, Quantity, Price, and Amount columns.
