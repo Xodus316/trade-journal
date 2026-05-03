@@ -3,20 +3,33 @@ import type {
   AnalyticsResponse,
   BotManualRow,
   CalendarDay,
+  ConsistencyScore,
   DayOfWeekBreakdownRow,
+  DrawdownPoint,
   DrawdownSummary,
   EquityPoint,
   HoldingPeriodPoint,
+  MonthlyPace,
+  NamedPerformanceRow,
+  OptionAnalytics,
+  PositionSizingRow,
   RealizedTimeframe,
+  ReviewAnalytics,
+  RiskSimulator,
+  RollingExpectancyPoint,
+  SetupCombinationRow,
   StreakSummary,
   StockAnalyticsResponse,
   StockBreakdownRow,
   StrategyAnalyticsResponse,
   StrategyBreakdownRow,
+  StrategyDecayRow,
   SummaryMetric,
   TimeBucket,
   TradeExtremes,
-  TransactionRecord
+  TransactionRecord,
+  UnsupportedAnalysis,
+  WhatIfScenario
 } from '@trade-journal/shared';
 
 import { query } from './db.js';
@@ -359,6 +372,422 @@ function buildTradeExtremes(closedRows: TransactionRecord[], limit = 5): TradeEx
   };
 }
 
+function summarizeNamedGroup(label: string, rows: TransactionRecord[]): NamedPerformanceRow {
+  const winners = rows.filter((row) => (row.profit ?? 0) >= 0);
+  const losers = rows.filter((row) => (row.profit ?? 0) < 0);
+  const sumWins = winners.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+  const sumLosses = Math.abs(losers.reduce((sum, row) => sum + (row.profit ?? 0), 0));
+  const realizedPnL = rows.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+
+  return {
+    label,
+    trades: rows.length,
+    wins: winners.length,
+    losses: losers.length,
+    winRate: rows.length ? round((winners.length / rows.length) * 100) : 0,
+    realizedPnL: round(realizedPnL),
+    expectancy: rows.length ? round(realizedPnL / rows.length) : 0,
+    profitFactor: sumLosses > 0 ? round(sumWins / sumLosses) : 0
+  };
+}
+
+function groupedPerformanceRows(
+  closedRows: TransactionRecord[],
+  getLabel: (row: TransactionRecord) => string | null,
+  minimumTrades = 1
+) {
+  const groups = new Map<string, TransactionRecord[]>();
+
+  for (const row of closedRows) {
+    const label = getLabel(row);
+    if (!label) {
+      continue;
+    }
+
+    groups.set(label, [...(groups.get(label) ?? []), row]);
+  }
+
+  return [...groups.entries()]
+    .map(([label, rows]) => summarizeNamedGroup(label, rows))
+    .filter((row) => row.trades >= minimumTrades)
+    .sort((a, b) => b.realizedPnL - a.realizedPnL);
+}
+
+function getDte(row: TransactionRecord) {
+  if (!row.expiration) {
+    return null;
+  }
+
+  return daysBetween(row.dateOpened, row.expiration);
+}
+
+function getDteBucket(row: TransactionRecord) {
+  const dte = getDte(row);
+  if (dte === null) {
+    return null;
+  }
+
+  if (dte === 0) {
+    return '0DTE';
+  }
+
+  if (dte <= 7) {
+    return '1-7 DTE';
+  }
+
+  if (dte <= 30) {
+    return '8-30 DTE';
+  }
+
+  return '31+ DTE';
+}
+
+function parseStrikeNumbers(strikes: string | null) {
+  if (!strikes) {
+    return [];
+  }
+
+  return strikes
+    .split('/')
+    .map((strike) => Number(strike.replace(/[cp]/gi, '').trim()))
+    .filter((strike) => Number.isFinite(strike));
+}
+
+function getSpreadWidth(row: TransactionRecord) {
+  const strikes = parseStrikeNumbers(row.strikes);
+  if (strikes.length < 2) {
+    return null;
+  }
+
+  return round(Math.max(...strikes) - Math.min(...strikes));
+}
+
+function getLegCount(row: TransactionRecord) {
+  if (!row.strikes) {
+    return null;
+  }
+
+  return row.strikes.split('/').filter((strike) => strike.trim()).length;
+}
+
+function buildOptionAnalytics(closedRows: TransactionRecord[]): OptionAnalytics {
+  const optionRows = closedRows.filter((row) => row.expiration || row.strikes);
+
+  return {
+    dteBreakdown: groupedPerformanceRows(optionRows, getDteBucket),
+    expirationWeekdayBreakdown: groupedPerformanceRows(optionRows, (row) =>
+      row.expiration ? dayLabels[getIsoDay(row.expiration)] : null
+    ),
+    spreadWidthBreakdown: groupedPerformanceRows(optionRows, (row) => {
+      const width = getSpreadWidth(row);
+      return width === null ? null : `${width}-wide`;
+    }),
+    creditDebitBreakdown: groupedPerformanceRows(optionRows, (row) => {
+      if (row.openingPrice === null) {
+        return 'Unknown open price';
+      }
+
+      return row.openingPrice >= 0 ? 'Credit opened' : 'Debit opened';
+    }),
+    legCountBreakdown: groupedPerformanceRows(optionRows, (row) => {
+      const legs = getLegCount(row);
+      return legs === null ? null : `${legs} leg${legs === 1 ? '' : 's'}`;
+    })
+  };
+}
+
+function buildRollingExpectancy(closedRows: TransactionRecord[]): RollingExpectancyPoint[] {
+  const ordered = [...closedRows]
+    .filter((row) => row.closeDate && row.profit !== null)
+    .sort((a, b) => {
+      const dateCompare = (a.closeDate ?? '').localeCompare(b.closeDate ?? '');
+      return dateCompare || a.createdAt.localeCompare(b.createdAt);
+    });
+
+  function windowExpectancy(index: number, size: number) {
+    const start = index - size + 1;
+    if (start < 0) {
+      return null;
+    }
+
+    const window = ordered.slice(start, index + 1);
+    return round(window.reduce((sum, row) => sum + (row.profit ?? 0), 0) / window.length);
+  }
+
+  return ordered.map((row, index) => ({
+    date: row.closeDate as string,
+    tradeNumber: index + 1,
+    expectancy20: windowExpectancy(index, 20),
+    expectancy50: windowExpectancy(index, 50),
+    expectancy100: windowExpectancy(index, 100)
+  }));
+}
+
+function buildStrategyDecay(closedRows: TransactionRecord[], windowSize = 30): StrategyDecayRow[] {
+  const groups = new Map<string, TransactionRecord[]>();
+
+  for (const row of closedRows) {
+    const key = `${row.positionSide}:${row.strategyType}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  return [...groups.values()]
+    .map((rows) => {
+      const ordered = [...rows].sort((a, b) => (a.closeDate ?? '').localeCompare(b.closeDate ?? ''));
+      const recent = ordered.slice(-windowSize);
+      const prior = ordered.slice(Math.max(0, ordered.length - windowSize * 2), Math.max(0, ordered.length - windowSize));
+      const recentExpectancy = recent.length ? round(recent.reduce((sum, row) => sum + (row.profit ?? 0), 0) / recent.length) : 0;
+      const priorExpectancy = prior.length ? round(prior.reduce((sum, row) => sum + (row.profit ?? 0), 0) / prior.length) : 0;
+      const delta = round(recentExpectancy - priorExpectancy);
+      const first = ordered[0];
+
+      return {
+        positionSide: first.positionSide,
+        strategyType: first.strategyType,
+        trades: ordered.length,
+        recentTrades: recent.length,
+        priorTrades: prior.length,
+        recentExpectancy,
+        priorExpectancy,
+        delta,
+        trend: prior.length === 0 ? 'New' : Math.abs(delta) < 10 ? 'Flat' : delta > 0 ? 'Improving' : 'Declining'
+      } satisfies StrategyDecayRow;
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+}
+
+function buildBestSetupCombinations(closedRows: TransactionRecord[]): SetupCombinationRow[] {
+  const groups = new Map<string, TransactionRecord[]>();
+
+  for (const row of closedRows) {
+    const dteBucket = getDteBucket(row) ?? 'No expiration';
+    const source = row.botOpened ? 'Bot' : 'Manual';
+    const key = `${row.stock}|${row.positionSide}|${row.strategyType}|${dteBucket}|${source}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  return [...groups.entries()]
+    .map(([key, rows]) => {
+      const [stock, positionSide, strategyType, dteBucket, source] = key.split('|');
+      return {
+        ...summarizeNamedGroup(key, rows),
+        stock,
+        positionSide: positionSide as 'Long' | 'Short',
+        strategyType,
+        dteBucket,
+        source: source as 'Bot' | 'Manual'
+      };
+    })
+    .filter((row) => row.trades >= 3)
+    .sort((a, b) => b.expectancy - a.expectancy)
+    .slice(0, 20);
+}
+
+function buildPositionSizing(closedRows: TransactionRecord[]): PositionSizingRow[] {
+  const rows = groupedPerformanceRows(closedRows, (row) => {
+    if (row.contracts <= 1) {
+      return '1 contract/share lot';
+    }
+
+    if (row.contracts <= 3) {
+      return '2-3 contracts/shares';
+    }
+
+    if (row.contracts <= 10) {
+      return '4-10 contracts/shares';
+    }
+
+    return '11+ contracts/shares';
+  });
+
+  return rows.map((row) => {
+    const sourceRows = closedRows.filter((trade) => {
+      if (row.label === '1 contract/share lot') return trade.contracts <= 1;
+      if (row.label === '2-3 contracts/shares') return trade.contracts > 1 && trade.contracts <= 3;
+      if (row.label === '4-10 contracts/shares') return trade.contracts > 3 && trade.contracts <= 10;
+      return trade.contracts > 10;
+    });
+
+    return {
+      ...row,
+      averageContracts: round(sourceRows.reduce((sum, trade) => sum + trade.contracts, 0) / sourceRows.length),
+      averageOpeningNotional: round(
+        sourceRows.reduce((sum, trade) => sum + Math.abs(trade.openingPrice ?? 0), 0) / sourceRows.length
+      )
+    };
+  });
+}
+
+function buildDrawdownCurve(closedRows: TransactionRecord[]): DrawdownPoint[] {
+  let peak = 0;
+  return buildEquityCurve(closedRows).map((point) => {
+    peak = Math.max(peak, point.cumulativePnL);
+    return {
+      date: point.date,
+      drawdown: round(point.cumulativePnL - peak)
+    };
+  });
+}
+
+function buildConsistency(closedRows: TransactionRecord[], summary: SummaryMetric, drawdown: DrawdownSummary): ConsistencyScore {
+  const profits = closedRows.map((row) => row.profit ?? 0);
+  const average = profits.length ? profits.reduce((sum, profit) => sum + profit, 0) / profits.length : 0;
+  const variance = profits.length ? profits.reduce((sum, profit) => sum + (profit - average) ** 2, 0) / profits.length : 0;
+  const returnVolatility = round(Math.sqrt(variance));
+  const winRateScore = Math.min(100, Math.max(0, summary.winRate));
+  const expectancyScore = Math.min(100, Math.max(0, 50 + summary.expectancy / 10));
+  const profitFactorScore = Math.min(100, Math.max(0, summary.profitFactor * 35));
+  const drawdownRatio = Math.abs(drawdown.maxDrawdown) / Math.max(Math.abs(summary.realizedPnL), 1);
+  const drawdownScore = Math.min(100, Math.max(0, 100 - drawdownRatio * 60));
+  const score = round(winRateScore * 0.25 + expectancyScore * 0.3 + profitFactorScore * 0.25 + drawdownScore * 0.2);
+
+  return {
+    score,
+    winRateScore: round(winRateScore),
+    expectancyScore: round(expectancyScore),
+    drawdownScore: round(drawdownScore),
+    profitFactorScore: round(profitFactorScore),
+    returnVolatility
+  };
+}
+
+function buildRiskSimulator(summary: SummaryMetric): RiskSimulator {
+  const winRate = summary.totalClosedTrades ? summary.winRate / 100 : 0;
+  const lossRate = Math.max(0, 1 - winRate);
+  const averageWin = summary.averageWinner;
+  const averageLoss = Math.abs(summary.averageLoser);
+  const breakevenWinRate = averageWin + averageLoss > 0 ? round((averageLoss / (averageWin + averageLoss)) * 100) : 0;
+
+  return {
+    winRate: summary.winRate,
+    averageWin,
+    averageLoss,
+    breakevenWinRate,
+    probabilityThreeLosses: round(lossRate ** 3 * 100),
+    probabilityFiveLosses: round(lossRate ** 5 * 100),
+    probabilityTenLosses: round(lossRate ** 10 * 100),
+    expectedTenTradePnL: round(summary.expectancy * 10),
+    expectedTwentyTradePnL: round(summary.expectancy * 20),
+    expectedFiftyTradePnL: round(summary.expectancy * 50)
+  };
+}
+
+function buildMonthlyPace(closedRows: TransactionRecord[]): MonthlyPace {
+  const latestCloseDate = closedRows.reduce<string | null>((latest, row) => {
+    if (!row.closeDate) return latest;
+    return !latest || row.closeDate > latest ? row.closeDate : latest;
+  }, null);
+
+  if (!latestCloseDate) {
+    return { month: null, elapsedTradingDays: 0, currentPnL: 0, averageDailyPnL: 0, projectedMonthlyPnL: 0 };
+  }
+
+  const month = latestCloseDate.slice(0, 7);
+  const monthRows = closedRows.filter((row) => row.closeDate?.startsWith(month));
+  const currentPnL = round(monthRows.reduce((sum, row) => sum + (row.profit ?? 0), 0));
+  const tradingDays = new Set(monthRows.map((row) => row.closeDate as string));
+  const elapsedTradingDays = tradingDays.size;
+  const averageDailyPnL = elapsedTradingDays ? round(currentPnL / elapsedTradingDays) : 0;
+
+  return {
+    month,
+    elapsedTradingDays,
+    currentPnL,
+    averageDailyPnL,
+    projectedMonthlyPnL: round(averageDailyPnL * 21)
+  };
+}
+
+function buildWhatIfScenarios(closedRows: TransactionRecord[]): WhatIfScenario[] {
+  const totalPnL = closedRows.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+  const strategies = buildStrategyBreakdown(closedRows).slice(-8);
+  const stocks = buildStockBreakdown(closedRows).slice(-5);
+
+  const strategyScenarios = strategies.map((row) => {
+    const removedPnL = closedRows
+      .filter((trade) => trade.positionSide === row.positionSide && trade.strategyType === row.strategyType)
+      .reduce((sum, trade) => sum + (trade.profit ?? 0), 0);
+    const nextPnL = round(totalPnL - removedPnL);
+
+    return {
+      label: `Skip ${row.positionSide} ${row.strategyType}`,
+      tradesRemoved: row.trades,
+      realizedPnL: nextPnL,
+      delta: round(nextPnL - totalPnL)
+    };
+  });
+
+  const stockScenarios = stocks.map((row) => {
+    const removedPnL = closedRows.filter((trade) => trade.stock === row.stock).reduce((sum, trade) => sum + (trade.profit ?? 0), 0);
+    const nextPnL = round(totalPnL - removedPnL);
+
+    return {
+      label: `Skip ${row.stock}`,
+      tradesRemoved: row.trades,
+      realizedPnL: nextPnL,
+      delta: round(nextPnL - totalPnL)
+    };
+  });
+
+  return [...strategyScenarios, ...stockScenarios].sort((a, b) => b.delta - a.delta).slice(0, 12);
+}
+
+function keywordFromText(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && !['trade', 'trades', 'this', 'that', 'with', 'from', 'because'].includes(word))[0];
+}
+
+function buildReviewAnalytics(closedRows: TransactionRecord[]): ReviewAnalytics {
+  const reviewedTrades = closedRows.filter((row) => row.reviewNotes || row.lessonLearned || row.exitReason || row.tags.length > 0);
+  const tagRows = closedRows.flatMap((row) => row.tags.map((tag) => ({ ...row, stock: tag })));
+  const lessonGroups = new Map<string, TransactionRecord[]>();
+
+  for (const row of closedRows) {
+    const keyword = keywordFromText(row.lessonLearned ?? '');
+    if (keyword) {
+      lessonGroups.set(keyword, [...(lessonGroups.get(keyword) ?? []), row]);
+    }
+  }
+
+  return {
+    totalClosedTrades: closedRows.length,
+    reviewedTrades: reviewedTrades.length,
+    reviewCompletionRate: closedRows.length ? round((reviewedTrades.length / closedRows.length) * 100) : 0,
+    missingReviewTrades: closedRows.length - reviewedTrades.length,
+    tagBreakdown: groupedPerformanceRows(tagRows, (row) => row.stock),
+    exitReasonBreakdown: groupedPerformanceRows(closedRows, (row) => row.exitReason),
+    lessonKeywordBreakdown: [...lessonGroups.entries()]
+      .map(([label, rows]) => summarizeNamedGroup(label, rows))
+      .sort((a, b) => b.trades - a.trades)
+      .slice(0, 12),
+    missingChartOrReviewNote: closedRows.filter((row) => !row.reviewNotes).length
+  };
+}
+
+function buildUnsupportedAnalyses(): UnsupportedAnalysis[] {
+  return [
+    {
+      label: 'MAE/MFE and entry/exit efficiency versus intraday range',
+      reason: 'The app does not currently store intraday high/low marks, quotes, or chart-derived excursion data.'
+    },
+    {
+      label: 'Time-of-day performance',
+      reason: 'Current transaction dates do not include execution timestamps.'
+    },
+    {
+      label: 'Market regime and volatility regime performance',
+      reason: 'The app does not currently ingest market index trend, VIX, IV rank, or realized volatility series.'
+    },
+    {
+      label: 'Formal monthly goal tracking',
+      reason: 'No monthly P&L target setting exists yet, so the dashboard shows monthly pace and projection instead.'
+    }
+  ];
+}
+
 function buildStrategyBreakdown(closedRows: TransactionRecord[]): StrategyBreakdownRow[] {
   const map = new Map<string, StrategyBreakdownRow>();
 
@@ -500,9 +929,11 @@ export async function getAnalytics(filters: AnalyticsFilters = defaultAnalyticsF
   const rows = applyFilters(await listAnalyticsRows(), filters);
   const closedRows = rows.filter((row) => row.closeDate && row.profit !== null);
   const openRows = rows.filter((row) => !row.closeDate);
+  const summary = buildSummary(closedRows, openRows);
+  const drawdown = buildDrawdown(closedRows);
 
   return {
-    summary: buildSummary(closedRows, openRows),
+    summary,
     filters,
     realizedViews: {
       daily: toTimeBuckets(closedRows, 'daily'),
@@ -511,12 +942,24 @@ export async function getAnalytics(filters: AnalyticsFilters = defaultAnalyticsF
       yearly: toTimeBuckets(closedRows, 'yearly')
     },
     equityCurve: buildEquityCurve(closedRows),
-    drawdown: buildDrawdown(closedRows),
+    drawdown,
     calendarHeatmap: buildCalendarHeatmap(closedRows),
     dayOfWeekBreakdown: buildDayOfWeekBreakdown(closedRows),
     holdingPeriodPoints: buildHoldingPeriodPoints(closedRows),
     streaks: buildStreaks(closedRows),
     tradeExtremes: buildTradeExtremes(closedRows),
+    rollingExpectancy: buildRollingExpectancy(closedRows),
+    strategyDecay: buildStrategyDecay(closedRows),
+    bestSetupCombinations: buildBestSetupCombinations(closedRows),
+    optionAnalytics: buildOptionAnalytics(closedRows),
+    positionSizing: buildPositionSizing(closedRows),
+    consistency: buildConsistency(closedRows, summary, drawdown),
+    riskSimulator: buildRiskSimulator(summary),
+    drawdownCurve: buildDrawdownCurve(closedRows),
+    monthlyPace: buildMonthlyPace(closedRows),
+    whatIfScenarios: buildWhatIfScenarios(closedRows),
+    reviewAnalytics: buildReviewAnalytics(closedRows),
+    unsupportedAnalyses: buildUnsupportedAnalyses(),
     botManualBreakdown: buildBotManualBreakdown(closedRows),
     strategyBreakdown: buildStrategyBreakdown(closedRows),
     stockBreakdown: buildStockBreakdown(closedRows),

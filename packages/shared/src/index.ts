@@ -179,6 +179,116 @@ export interface TradeExtremes {
   losers: TransactionRecord[];
 }
 
+export interface NamedPerformanceRow {
+  label: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  realizedPnL: number;
+  expectancy: number;
+  profitFactor: number;
+}
+
+export interface RollingExpectancyPoint {
+  date: string;
+  tradeNumber: number;
+  expectancy20: number | null;
+  expectancy50: number | null;
+  expectancy100: number | null;
+}
+
+export interface StrategyDecayRow {
+  positionSide: PositionSide;
+  strategyType: string;
+  trades: number;
+  recentTrades: number;
+  priorTrades: number;
+  recentExpectancy: number;
+  priorExpectancy: number;
+  delta: number;
+  trend: 'Improving' | 'Declining' | 'Flat' | 'New';
+}
+
+export interface SetupCombinationRow extends NamedPerformanceRow {
+  stock: string;
+  positionSide: PositionSide;
+  strategyType: string;
+  dteBucket: string;
+  source: 'Bot' | 'Manual';
+}
+
+export interface OptionAnalytics {
+  dteBreakdown: NamedPerformanceRow[];
+  expirationWeekdayBreakdown: NamedPerformanceRow[];
+  spreadWidthBreakdown: NamedPerformanceRow[];
+  creditDebitBreakdown: NamedPerformanceRow[];
+  legCountBreakdown: NamedPerformanceRow[];
+}
+
+export interface PositionSizingRow extends NamedPerformanceRow {
+  averageContracts: number;
+  averageOpeningNotional: number;
+}
+
+export interface ConsistencyScore {
+  score: number;
+  winRateScore: number;
+  expectancyScore: number;
+  drawdownScore: number;
+  profitFactorScore: number;
+  returnVolatility: number;
+}
+
+export interface RiskSimulator {
+  winRate: number;
+  averageWin: number;
+  averageLoss: number;
+  breakevenWinRate: number;
+  probabilityThreeLosses: number;
+  probabilityFiveLosses: number;
+  probabilityTenLosses: number;
+  expectedTenTradePnL: number;
+  expectedTwentyTradePnL: number;
+  expectedFiftyTradePnL: number;
+}
+
+export interface DrawdownPoint {
+  date: string;
+  drawdown: number;
+}
+
+export interface MonthlyPace {
+  month: string | null;
+  elapsedTradingDays: number;
+  currentPnL: number;
+  averageDailyPnL: number;
+  projectedMonthlyPnL: number;
+}
+
+export interface WhatIfScenario {
+  label: string;
+  tradesRemoved: number;
+  realizedPnL: number;
+  delta: number;
+}
+
+export interface ReviewAnalytics {
+  totalClosedTrades: number;
+  reviewedTrades: number;
+  reviewCompletionRate: number;
+  missingReviewTrades: number;
+  tagBreakdown: NamedPerformanceRow[];
+  exitReasonBreakdown: NamedPerformanceRow[];
+  lessonKeywordBreakdown: NamedPerformanceRow[];
+  missingChartOrReviewNote: number;
+}
+
+export interface UnsupportedAnalysis {
+  label: string;
+  reason: string;
+}
+
 export interface SummaryMetric {
   realizedPnL: number;
   totalFees: number;
@@ -210,6 +320,18 @@ export interface AnalyticsResponse {
   holdingPeriodPoints: HoldingPeriodPoint[];
   streaks: StreakSummary;
   tradeExtremes: TradeExtremes;
+  rollingExpectancy: RollingExpectancyPoint[];
+  strategyDecay: StrategyDecayRow[];
+  bestSetupCombinations: SetupCombinationRow[];
+  optionAnalytics: OptionAnalytics;
+  positionSizing: PositionSizingRow[];
+  consistency: ConsistencyScore;
+  riskSimulator: RiskSimulator;
+  drawdownCurve: DrawdownPoint[];
+  monthlyPace: MonthlyPace;
+  whatIfScenarios: WhatIfScenario[];
+  reviewAnalytics: ReviewAnalytics;
+  unsupportedAnalyses: UnsupportedAnalysis[];
   botManualBreakdown: BotManualRow[];
   strategyBreakdown: StrategyBreakdownRow[];
   stockBreakdown: StockBreakdownRow[];

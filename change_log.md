@@ -2,6 +2,13 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-03 16:30:06 PDT
+
+- Expanded analytics with rolling expectancy, strategy decay, best setup combinations, option DTE/expiration/spread/credit-debit/leg-count breakdowns, and position sizing analysis.
+- Added risk analytics for consistency score, rolling drawdown, risk-of-loss-streak simulator, monthly pace projection, and what-if skip scenarios.
+- Added review analytics for review completeness, tags, exit reasons, lesson keywords, and unavailable-analysis diagnostics for data the app does not currently store.
+- Added Options and Review dashboard sections and expanded Performance, Breakdowns, and Risk to display the new datasets.
+
 ## 2026-05-02 22:14:38 PDT
 
 - Split the dashboard into focused Overview, Performance, Breakdowns, Calendar, and Risk sections.

@@ -15,14 +15,16 @@ interface DashboardPageProps {
   onStrategySelect: (strategy: StrategyBreakdownRow) => void;
 }
 
-type DashboardSection = 'overview' | 'performance' | 'breakdowns' | 'calendar' | 'risk';
+type DashboardSection = 'overview' | 'performance' | 'options' | 'breakdowns' | 'calendar' | 'risk' | 'review';
 
 const dashboardSections: Array<{ id: DashboardSection; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'performance', label: 'Performance' },
+  { id: 'options', label: 'Options' },
   { id: 'breakdowns', label: 'Breakdowns' },
   { id: 'calendar', label: 'Calendar' },
-  { id: 'risk', label: 'Risk' }
+  { id: 'risk', label: 'Risk' },
+  { id: 'review', label: 'Review' }
 ];
 
 const timeframes: RealizedTimeframe[] = ['daily', 'weekly', 'monthly', 'yearly'];
@@ -70,6 +72,41 @@ function TableShell({ children, empty }: { children: ReactNode; empty?: boolean 
   }
 
   return <div className="table-scroll">{children}</div>;
+}
+
+function PerformanceRowsTable({
+  rows,
+  labelHeader = 'Group'
+}: {
+  rows: Array<{ label: string; trades: number; winRate: number; expectancy: number; realizedPnL: number }>;
+  labelHeader?: string;
+}) {
+  return (
+    <TableShell empty={rows.length === 0}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>{labelHeader}</th>
+            <th>Trades</th>
+            <th>Win Rate</th>
+            <th>Expectancy</th>
+            <th>P&L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 10).map((row) => (
+            <tr key={row.label}>
+              <td>{row.label}</td>
+              <td>{row.trades}</td>
+              <td>{formatPercent(row.winRate)}</td>
+              <td>{formatCurrency(row.expectancy)}</td>
+              <td>{formatCurrency(row.realizedPnL)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableShell>
+  );
 }
 
 export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategySelect }: DashboardPageProps) {
@@ -276,6 +313,50 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
                   formatY={formatCurrency}
                 />
               </section>
+
+              <section className="panel">
+                <SectionHeader title="Rolling expectancy" subtitle="Last 20 closed trades" />
+                {analytics.rollingExpectancy.filter((point) => point.expectancy20 !== null).length === 0 ? (
+                  <div className="empty-state compact-empty">At least 20 closed trades are needed.</div>
+                ) : (
+                  <LineChart
+                    points={analytics.rollingExpectancy
+                      .filter((point) => point.expectancy20 !== null)
+                      .slice(-160)
+                      .map((point) => ({ x: point.date, y: point.expectancy20 ?? 0 }))}
+                    formatY={formatCurrency}
+                  />
+                )}
+              </section>
+            </div>
+          )}
+
+          {activeSection === 'options' && (
+            <div className="dashboard-layout">
+              <section className="panel">
+                <SectionHeader title="DTE analysis" subtitle="Profitability by days to expiration" />
+                <PerformanceRowsTable rows={analytics.optionAnalytics.dteBreakdown} labelHeader="DTE" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Expiration weekday" subtitle="Performance by expiration day" />
+                <PerformanceRowsTable rows={analytics.optionAnalytics.expirationWeekdayBreakdown} labelHeader="Weekday" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Spread width" subtitle="Strike distance analysis" />
+                <PerformanceRowsTable rows={analytics.optionAnalytics.spreadWidthBreakdown} labelHeader="Width" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Credit vs debit" subtitle="Open premium efficiency" />
+                <PerformanceRowsTable rows={analytics.optionAnalytics.creditDebitBreakdown} labelHeader="Open Type" />
+              </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Leg count" subtitle="Single-leg vs multi-leg performance" />
+                <PerformanceRowsTable rows={analytics.optionAnalytics.legCountBreakdown} labelHeader="Legs" />
+              </section>
             </div>
           )}
 
@@ -366,6 +447,66 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
                   </table>
                 </TableShell>
               </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Strategy decay" subtitle="Recent expectancy versus prior expectancy" />
+                <TableShell empty={analytics.strategyDecay.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Strategy</th>
+                        <th>Recent</th>
+                        <th>Prior</th>
+                        <th>Delta</th>
+                        <th>Trend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.strategyDecay.slice(0, 12).map((row) => (
+                        <tr key={`${row.positionSide}-${row.strategyType}`}>
+                          <td>
+                            {row.positionSide} {row.strategyType}
+                          </td>
+                          <td>{formatCurrency(row.recentExpectancy)}</td>
+                          <td>{formatCurrency(row.priorExpectancy)}</td>
+                          <td>{formatCurrency(row.delta)}</td>
+                          <td>{row.trend}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Best setup combinations" subtitle="Stock + strategy + side + DTE + source" />
+                <TableShell empty={analytics.bestSetupCombinations.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Setup</th>
+                        <th>Trades</th>
+                        <th>Expectancy</th>
+                        <th>Win Rate</th>
+                        <th>P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.bestSetupCombinations.slice(0, 12).map((row) => (
+                        <tr key={row.label}>
+                          <td>
+                            {row.stock} {row.positionSide} {row.strategyType} · {row.dteBucket} · {row.source}
+                          </td>
+                          <td>{row.trades}</td>
+                          <td>{formatCurrency(row.expectancy)}</td>
+                          <td>{formatPercent(row.winRate)}</td>
+                          <td>{formatCurrency(row.realizedPnL)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
             </div>
           )}
 
@@ -398,6 +539,56 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
           {activeSection === 'risk' && (
             <div className="dashboard-layout">
               <section className="panel">
+                <SectionHeader title="Consistency score" subtitle="Win rate, expectancy, drawdown, and profit factor" />
+                <div className="mini-stat-grid">
+                  <div>
+                    <span>Score</span>
+                    <strong>{analytics.consistency.score}/100</strong>
+                  </div>
+                  <div>
+                    <span>Volatility</span>
+                    <strong>{formatCurrency(analytics.consistency.returnVolatility)}</strong>
+                  </div>
+                  <div>
+                    <span>Drawdown Score</span>
+                    <strong>{analytics.consistency.drawdownScore}</strong>
+                  </div>
+                  <div>
+                    <span>Expectancy Score</span>
+                    <strong>{analytics.consistency.expectancyScore}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Sizing review" subtitle="Performance by contract/share size" />
+                <TableShell empty={analytics.positionSizing.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Size</th>
+                        <th>Trades</th>
+                        <th>Avg Qty</th>
+                        <th>Expectancy</th>
+                        <th>P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.positionSizing.map((row) => (
+                        <tr key={row.label}>
+                          <td>{row.label}</td>
+                          <td>{row.trades}</td>
+                          <td>{row.averageContracts}</td>
+                          <td>{formatCurrency(row.expectancy)}</td>
+                          <td>{formatCurrency(row.realizedPnL)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
+
+              <section className="panel">
                 <SectionHeader title="Streaks" subtitle="Filtered closed trades" />
                 <div className="mini-stat-grid">
                   <div>
@@ -424,12 +615,75 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
               </section>
 
               <section className="panel">
+                <SectionHeader title="Risk simulator" subtitle="Based on historical win rate and average win/loss" />
+                <CompactMetricList
+                  rows={[
+                    { label: 'Breakeven win rate', value: formatPercent(analytics.riskSimulator.breakevenWinRate) },
+                    { label: 'Chance of 3 losses', value: formatPercent(analytics.riskSimulator.probabilityThreeLosses) },
+                    { label: 'Chance of 5 losses', value: formatPercent(analytics.riskSimulator.probabilityFiveLosses) },
+                    { label: 'Chance of 10 losses', value: formatPercent(analytics.riskSimulator.probabilityTenLosses) },
+                    { label: 'Expected 20-trade P&L', value: formatCurrency(analytics.riskSimulator.expectedTwentyTradePnL) }
+                  ]}
+                />
+              </section>
+
+              <section className="panel">
                 <SectionHeader title="Outlier impact" subtitle={`Best and worst ${analytics.tradeExtremes.limit}`} />
                 <CompactMetricList
                   rows={[
                     { label: 'Total P&L', value: formatCurrency(analytics.tradeExtremes.totalPnL) },
                     { label: `Without worst ${analytics.tradeExtremes.limit}`, value: formatCurrency(analytics.tradeExtremes.withoutWorst) },
                     { label: `Without best ${analytics.tradeExtremes.limit}`, value: formatCurrency(analytics.tradeExtremes.withoutBest) }
+                  ]}
+                />
+              </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Rolling drawdown" subtitle="Current equity below prior peak" />
+                {analytics.drawdownCurve.length === 0 ? (
+                  <div className="empty-state compact-empty">No drawdown data yet.</div>
+                ) : (
+                  <LineChart
+                    points={analytics.drawdownCurve.map((point) => ({ x: point.date, y: point.drawdown }))}
+                    formatY={formatCurrency}
+                  />
+                )}
+              </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="What-if simulator" subtitle="Projected total P&L if selected weak areas were skipped" />
+                <TableShell empty={analytics.whatIfScenarios.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Scenario</th>
+                        <th>Trades Removed</th>
+                        <th>New P&L</th>
+                        <th>Impact</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.whatIfScenarios.map((row) => (
+                        <tr key={row.label}>
+                          <td>{row.label}</td>
+                          <td>{row.tradesRemoved}</td>
+                          <td>{formatCurrency(row.realizedPnL)}</td>
+                          <td>{formatCurrency(row.delta)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Monthly pace" subtitle="Latest month projection using observed trading days" />
+                <CompactMetricList
+                  rows={[
+                    { label: 'Month', value: analytics.monthlyPace.month ?? '-' },
+                    { label: 'Current P&L', value: formatCurrency(analytics.monthlyPace.currentPnL) },
+                    { label: 'Avg daily P&L', value: formatCurrency(analytics.monthlyPace.averageDailyPnL) },
+                    { label: 'Projected month', value: formatCurrency(analytics.monthlyPace.projectedMonthlyPnL) }
                   ]}
                 />
               </section>
@@ -482,6 +736,69 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
                     </table>
                   </TableShell>
                 </div>
+              </section>
+            </div>
+          )}
+
+          {activeSection === 'review' && (
+            <div className="dashboard-layout">
+              <section className="panel">
+                <SectionHeader title="Review completeness" subtitle="Notes, lessons, exit reasons, and tags" />
+                <div className="mini-stat-grid">
+                  <div>
+                    <span>Reviewed</span>
+                    <strong>{analytics.reviewAnalytics.reviewedTrades}</strong>
+                  </div>
+                  <div>
+                    <span>Completion</span>
+                    <strong>{formatPercent(analytics.reviewAnalytics.reviewCompletionRate)}</strong>
+                  </div>
+                  <div>
+                    <span>Missing</span>
+                    <strong>{analytics.reviewAnalytics.missingReviewTrades}</strong>
+                  </div>
+                  <div>
+                    <span>No Review Note</span>
+                    <strong>{analytics.reviewAnalytics.missingChartOrReviewNote}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Mistake and tag analytics" subtitle="Performance by trade tags" />
+                <PerformanceRowsTable rows={analytics.reviewAnalytics.tagBreakdown} labelHeader="Tag" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Exit reasons" subtitle="How outcomes cluster by exit reason" />
+                <PerformanceRowsTable rows={analytics.reviewAnalytics.exitReasonBreakdown} labelHeader="Reason" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Lesson keywords" subtitle="Repeated words from lessons learned" />
+                <PerformanceRowsTable rows={analytics.reviewAnalytics.lessonKeywordBreakdown} labelHeader="Keyword" />
+              </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Needs more data" subtitle="Analysis ideas that require additional imports or fields" />
+                <TableShell empty={analytics.unsupportedAnalyses.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Analysis</th>
+                        <th>Missing Data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.unsupportedAnalyses.map((row) => (
+                        <tr key={row.label}>
+                          <td>{row.label}</td>
+                          <td>{row.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
               </section>
             </div>
           )}
