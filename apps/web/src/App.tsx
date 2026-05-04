@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { StrategyBreakdownRow, TransactionRecord } from '@trade-journal/shared';
 
 import { defaultFilters, FilterBar } from './components/FilterBar';
+import { BrokerDetailPage } from './pages/BrokerDetailPage';
 import { BotManualPage } from './pages/BotManualPage';
 import { CleanupPage } from './pages/CleanupPage';
 import { DailyReviewPage } from './pages/DailyReviewPage';
@@ -22,10 +23,11 @@ export function App() {
   const [filters, setFilters] = useState(defaultFilters);
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyBreakdownRow | null>(null);
+  const [selectedBroker, setSelectedBroker] = useState<string | null>(null);
   const [selectedTrade, setSelectedTrade] = useState<TransactionRecord | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  const isDetailPage = Boolean(selectedStock || selectedStrategy || selectedTrade || selectedDay);
+  const isDetailPage = Boolean(selectedStock || selectedStrategy || selectedBroker || selectedTrade || selectedDay);
 
   return (
     <div className="app-shell">
@@ -43,6 +45,7 @@ export function App() {
               onClick={() => {
                 setSelectedStock(null);
                 setSelectedStrategy(null);
+                setSelectedBroker(null);
                 setSelectedTrade(null);
                 setSelectedDay(null);
                 setActiveTab(tab);
@@ -64,6 +67,8 @@ export function App() {
           <DailyReviewPage date={selectedDay} onBack={() => setSelectedDay(null)} onTradeSelect={setSelectedTrade} />
         ) : selectedStock ? (
           <StockDetailPage stock={selectedStock} onBack={() => setSelectedStock(null)} onTradeSelect={setSelectedTrade} />
+        ) : selectedBroker ? (
+          <BrokerDetailPage broker={selectedBroker} onBack={() => setSelectedBroker(null)} onTradeSelect={setSelectedTrade} />
         ) : selectedStrategy ? (
           <StrategyDetailPage
             positionSide={selectedStrategy.positionSide}
@@ -77,6 +82,7 @@ export function App() {
               <DashboardPage
                 filters={filters}
                 onDaySelect={setSelectedDay}
+                onBrokerSelect={setSelectedBroker}
                 onStockSelect={setSelectedStock}
                 onStrategySelect={setSelectedStrategy}
               />

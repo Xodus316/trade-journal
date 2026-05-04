@@ -2,6 +2,12 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-03 17:12:44 PDT
+
+- Added broker drilldown analytics with realized P&L, daily P&L, equity curve, strategy ranking, stock ranking, and trade list.
+- Made dashboard broker names clickable.
+- Added frontend API coverage for the broker analytics endpoint.
+
 ## 2026-05-03 17:07:03 PDT
 
 - Added broker-level realized P&L analytics to the API response.

@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import type { AnalyticsFilters } from '@trade-journal/shared';
 
-import { defaultAnalyticsFilters, getAnalytics, getStockAnalytics, getStrategyAnalytics } from '../lib/analytics-service.js';
+import { defaultAnalyticsFilters, getAnalytics, getBrokerAnalytics, getStockAnalytics, getStrategyAnalytics } from '../lib/analytics-service.js';
 
 export const analyticsRouter = Router();
 
@@ -34,6 +34,18 @@ analyticsRouter.get('/stocks/:stock', async (req, res) => {
   if (!payload) {
     return res.status(404).json({
       message: 'Stock not found.'
+    });
+  }
+
+  return res.json(payload);
+});
+
+analyticsRouter.get('/brokers/:broker', async (req, res) => {
+  const payload = await getBrokerAnalytics(req.params.broker);
+
+  if (!payload) {
+    return res.status(404).json({
+      message: 'Broker not found.'
     });
   }
 

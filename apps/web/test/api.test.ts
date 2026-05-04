@@ -11,6 +11,7 @@ import {
   deleteTransaction,
   exportBackup,
   getAnalytics,
+  getBrokerAnalytics,
   getDailyReview,
   getImportHistory,
   getOpenPositions,
@@ -143,6 +144,14 @@ describe('API client GET calls', () => {
     await getStockAnalytics('/ES');
 
     assert.equal(latestCall().url, 'http://localhost:4000/analytics/stocks/%2FES');
+  });
+
+  it('calls broker analytics with encoded broker names', async () => {
+    mockFetch({ broker: 'Unknown broker' });
+
+    await getBrokerAnalytics('Unknown broker');
+
+    assert.equal(latestCall().url, 'http://localhost:4000/analytics/brokers/Unknown%20broker');
   });
 
   it('calls strategy analytics with encoded route parts', async () => {

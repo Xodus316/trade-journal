@@ -1,6 +1,7 @@
 import type {
   AnalyticsFilters,
   AnalyticsResponse,
+  BrokerAnalyticsResponse,
   BotManualRow,
   CalendarDay,
   ConsistencyScore,
@@ -986,6 +987,29 @@ export async function getStockAnalytics(stock: string): Promise<StockAnalyticsRe
     equityCurve: buildEquityCurve(closedRows),
     drawdown: buildDrawdown(closedRows),
     strategyBreakdown: buildStrategyBreakdown(closedRows),
+    trades: rows
+  };
+}
+
+export async function getBrokerAnalytics(broker: string): Promise<BrokerAnalyticsResponse | null> {
+  const normalizedBroker = broker.trim().toLowerCase();
+  const rows = (await listAnalyticsRows()).filter((row) => (row.broker ?? 'Unknown broker').toLowerCase() === normalizedBroker);
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const closedRows = rows.filter((row) => row.closeDate && row.profit !== null);
+  const openRows = rows.filter((row) => !row.closeDate);
+
+  return {
+    broker: rows[0].broker ?? 'Unknown broker',
+    summary: buildSummary(closedRows, openRows),
+    dailyPnL: toTimeBuckets(closedRows, 'daily'),
+    equityCurve: buildEquityCurve(closedRows),
+    drawdown: buildDrawdown(closedRows),
+    strategyBreakdown: buildStrategyBreakdown(closedRows),
+    stockBreakdown: buildStockBreakdown(closedRows),
     trades: rows
   };
 }

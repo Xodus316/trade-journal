@@ -349,6 +349,17 @@ export interface StockAnalyticsResponse {
   trades: TransactionRecord[];
 }
 
+export interface BrokerAnalyticsResponse {
+  broker: string;
+  summary: SummaryMetric;
+  dailyPnL: TimeBucket[];
+  equityCurve: EquityPoint[];
+  drawdown: DrawdownSummary;
+  strategyBreakdown: StrategyBreakdownRow[];
+  stockBreakdown: StockBreakdownRow[];
+  trades: TransactionRecord[];
+}
+
 export interface StrategyAnalyticsResponse {
   positionSide: PositionSide;
   strategyType: string;

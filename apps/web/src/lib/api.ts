@@ -3,6 +3,7 @@ import type {
   BackupPayload,
   BackupRestoreResult,
   AnalyticsFilters,
+  BrokerAnalyticsResponse,
   CleanupRenameResult,
   DailyReview,
   DailyReviewInput,
@@ -91,6 +92,10 @@ export function getAnalytics(filters?: Partial<AnalyticsFilters>) {
 
 export function getStockAnalytics(stock: string) {
   return requestJson<StockAnalyticsResponse>(`/analytics/stocks/${encodeURIComponent(stock)}`);
+}
+
+export function getBrokerAnalytics(broker: string) {
+  return requestJson<BrokerAnalyticsResponse>(`/analytics/brokers/${encodeURIComponent(broker)}`);
 }
 
 export function getStrategyAnalytics(positionSide: string, strategyType: string) {

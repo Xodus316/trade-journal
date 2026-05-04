@@ -11,6 +11,7 @@ import { formatCurrency, formatPercent } from '../lib/format';
 interface DashboardPageProps {
   filters: AnalyticsFilters;
   onDaySelect: (date: string) => void;
+  onBrokerSelect: (broker: string) => void;
   onStockSelect: (stock: string) => void;
   onStrategySelect: (strategy: StrategyBreakdownRow) => void;
 }
@@ -109,7 +110,7 @@ function PerformanceRowsTable({
   );
 }
 
-export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategySelect }: DashboardPageProps) {
+export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSelect, onStrategySelect }: DashboardPageProps) {
   const [timeframe, setTimeframe] = useState<RealizedTimeframe>('monthly');
   const [activeSection, setActiveSection] = useState<DashboardSection>('overview');
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
@@ -450,7 +451,34 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
 
               <section className="panel">
                 <SectionHeader title="Broker P&L" subtitle="Realized performance by broker" />
-                <PerformanceRowsTable rows={analytics.brokerBreakdown} labelHeader="Broker" />
+                <TableShell empty={analytics.brokerBreakdown.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Broker</th>
+                        <th>Trades</th>
+                        <th>Win Rate</th>
+                        <th>Expectancy</th>
+                        <th>P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.brokerBreakdown.slice(0, 10).map((row) => (
+                        <tr key={row.label}>
+                          <td>
+                            <button className="table-link" onClick={() => onBrokerSelect(row.label)} type="button">
+                              {row.label}
+                            </button>
+                          </td>
+                          <td>{row.trades}</td>
+                          <td>{formatPercent(row.winRate)}</td>
+                          <td>{formatCurrency(row.expectancy)}</td>
+                          <td>{formatCurrency(row.realizedPnL)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
               </section>
 
               <section className="panel panel-large">
