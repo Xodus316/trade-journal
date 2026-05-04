@@ -2,6 +2,18 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-03 23:09:21 PDT
+
+- Added latest close date tracking to strategy breakdown analytics.
+- Updated the dashboard Strategy Ranking card to show every strategy instead of only the top 10, with sorting by recent activity, P&L, trade count, or name.
+
+## 2026-05-03 21:40:43 PDT
+
+- Fixed Robinhood broker activity CSV matching so same-day rows keep source order, option expirations close all remaining lots at zero, and partial closes with different close dates do not overwrite each other.
+- Changed broker activity stock matching to ignore unmatched sells instead of treating them as short-stock openings.
+- Changed broker activity imports to exclude stock trades from realized P&L so Robinhood reflects option trades only.
+- Verified the Robinhood activity file dry-run now imports 198 option rows with `-$26,009.02` realized P&L, which is close to the expected `-$23k` range.
+
 ## 2026-05-03 17:12:44 PDT
 
 - Added broker drilldown analytics with realized P&L, daily P&L, equity curve, strategy ranking, stock ranking, and trade list.

@@ -397,7 +397,6 @@ type BrokerOptionLot = BrokerOptionContract & {
   remainingQuantity: number;
   amount: number;
   rowNumber: number;
-  openGroupKey: string;
 };
 
 type BrokerOptionMatch = BrokerOptionContract & {
@@ -409,8 +408,7 @@ type BrokerOptionMatch = BrokerOptionContract & {
   closeAmount: number;
   openRowNumber: number;
   closeRowNumber: number;
-  openGroupKey: string;
-  closeGroupKey: string;
+  tradeGroupKey: string;
 };
 
 type BrokerStockLot = {
@@ -421,7 +419,6 @@ type BrokerStockLot = {
   remainingQuantity: number;
   amount: number;
   rowNumber: number;
-  openGroupKey: string;
 };
 
 type BrokerStockMatch = {
@@ -434,36 +431,8 @@ type BrokerStockMatch = {
   closeAmount: number;
   openRowNumber: number;
   closeRowNumber: number;
-  openGroupKey: string;
-  closeGroupKey: string;
+  tradeGroupKey: string;
 };
-
-class UnionFind {
-  private readonly parents: number[];
-
-  constructor(size: number) {
-    this.parents = Array.from({ length: size }, (_, index) => index);
-  }
-
-  find(index: number): number {
-    const parent = this.parents[index];
-    if (parent === index) {
-      return index;
-    }
-
-    const root = this.find(parent);
-    this.parents[index] = root;
-    return root;
-  }
-
-  union(first: number, second: number) {
-    const firstRoot = this.find(first);
-    const secondRoot = this.find(second);
-    if (firstRoot !== secondRoot) {
-      this.parents[secondRoot] = firstRoot;
-    }
-  }
-}
 
 function parseBrokerOptionDescription(description: string, stockCell: string): BrokerOptionContract | null {
   const normalized = description.replace(/\s+/g, ' ').trim();
@@ -491,44 +460,24 @@ function brokerOptionKey(contract: BrokerOptionContract) {
   return `${contract.stock.toUpperCase()}|${contract.expiration}|${contract.optionType}|${formatStrike(contract.strike)}`;
 }
 
-function brokerOptionGroupKey(prefix: string, date: string, contract: BrokerOptionContract) {
-  return `${prefix}|${date}|${contract.stock.toUpperCase()}|${contract.expiration}`;
+function brokerOptionTradeGroupKey(openDate: string, closeDate: string, contract: BrokerOptionContract) {
+  return `${contract.stock.toUpperCase()}|${contract.expiration}|${openDate}|${closeDate}`;
 }
 
-function brokerStockGroupKey(prefix: string, date: string, stock: string, side: BrokerLotSide) {
-  return `${prefix}|${date}|${stock.toUpperCase()}|${side}`;
+function brokerStockTradeGroupKey(openDate: string, closeDate: string, stock: string) {
+  return `${stock.toUpperCase()}|stock|${openDate}|${closeDate}`;
 }
 
 function allocateAmount(totalAmount: number, matchedQuantity: number, totalQuantity: number) {
   return totalQuantity === 0 ? 0 : (totalAmount * matchedQuantity) / totalQuantity;
 }
 
-function groupMatches<T extends { openGroupKey: string; closeGroupKey: string }>(matches: T[]) {
-  const unionFind = new UnionFind(matches.length);
-  const byOpenGroup = new Map<string, number>();
-  const byCloseGroup = new Map<string, number>();
+function groupMatches<T extends { tradeGroupKey: string }>(matches: T[]) {
+  const groups = new Map<string, T[]>();
 
-  matches.forEach((match, index) => {
-    const openIndex = byOpenGroup.get(match.openGroupKey);
-    if (openIndex === undefined) {
-      byOpenGroup.set(match.openGroupKey, index);
-    } else {
-      unionFind.union(openIndex, index);
-    }
-
-    const closeIndex = byCloseGroup.get(match.closeGroupKey);
-    if (closeIndex === undefined) {
-      byCloseGroup.set(match.closeGroupKey, index);
-    } else {
-      unionFind.union(closeIndex, index);
-    }
-  });
-
-  const groups = new Map<number, T[]>();
-  matches.forEach((match, index) => {
-    const root = unionFind.find(index);
-    groups.set(root, [...(groups.get(root) ?? []), match]);
-  });
+  for (const match of matches) {
+    groups.set(match.tradeGroupKey, [...(groups.get(match.tradeGroupKey) ?? []), match]);
+  }
 
   return [...groups.values()];
 }
@@ -687,14 +636,7 @@ function parseBrokerActivityRows(rows: string[][], headerRowIndex: number, error
     });
   }
 
-  return activityRows.sort((first, second) => {
-    const dateCompare = first.activityDate.localeCompare(second.activityDate);
-    if (dateCompare !== 0) {
-      return dateCompare;
-    }
-
-    return second.rowNumber - first.rowNumber;
-  });
+  return activityRows.sort((first, second) => first.activityDate.localeCompare(second.activityDate));
 }
 
 function matchBrokerOptionRows(activityRows: BrokerActivityRow[], errors: ImportResult['errors']) {
@@ -713,7 +655,6 @@ function matchBrokerOptionRows(activityRows: BrokerActivityRow[], errors: Import
     }
 
     const key = brokerOptionKey(contract);
-    const openGroupKey = brokerOptionGroupKey('open', row.activityDate, contract);
 
     if (row.code === 'BTO' || row.code === 'STO') {
       const lot: BrokerOptionLot = {
@@ -723,16 +664,39 @@ function matchBrokerOptionRows(activityRows: BrokerActivityRow[], errors: Import
         quantity: row.quantity,
         remainingQuantity: row.quantity,
         amount: row.amount,
-        rowNumber: row.rowNumber,
-        openGroupKey
+        rowNumber: row.rowNumber
       };
       openLots.set(key, [...(openLots.get(key) ?? []), lot]);
       continue;
     }
 
-    const closingSide: BrokerLotSide =
-      row.code === 'OEXP' ? row.expirationSide : row.code === 'STC' ? 'Long' : 'Short';
     const lots = openLots.get(key) ?? [];
+    if (row.code === 'OEXP') {
+      for (const lot of lots) {
+        if (lot.remainingQuantity <= 0) {
+          continue;
+        }
+
+        const matchedQuantity = lot.remainingQuantity;
+        lot.remainingQuantity = 0;
+
+        matches.push({
+          ...contract,
+          side: lot.side,
+          openDate: lot.openDate,
+          closeDate: row.activityDate,
+          quantity: matchedQuantity,
+          openAmount: allocateAmount(lot.amount, matchedQuantity, lot.quantity),
+          closeAmount: 0,
+          openRowNumber: lot.rowNumber,
+          closeRowNumber: row.rowNumber,
+          tradeGroupKey: brokerOptionTradeGroupKey(lot.openDate, row.activityDate, contract)
+        });
+      }
+      continue;
+    }
+
+    const closingSide: BrokerLotSide = row.code === 'STC' ? 'Long' : 'Short';
     let remainingCloseQuantity = row.quantity;
 
     for (const lot of lots) {
@@ -755,11 +719,10 @@ function matchBrokerOptionRows(activityRows: BrokerActivityRow[], errors: Import
         closeDate: row.activityDate,
         quantity: matchedQuantity,
         openAmount: allocateAmount(lot.amount, matchedQuantity, lot.quantity),
-        closeAmount: row.code === 'OEXP' ? 0 : allocateAmount(row.amount, matchedQuantity, row.quantity),
+        closeAmount: allocateAmount(row.amount, matchedQuantity, row.quantity),
         openRowNumber: lot.rowNumber,
         closeRowNumber: row.rowNumber,
-        openGroupKey: lot.openGroupKey,
-        closeGroupKey: brokerOptionGroupKey('close', row.activityDate, contract)
+        tradeGroupKey: brokerOptionTradeGroupKey(lot.openDate, row.activityDate, contract)
       });
     }
   }
@@ -781,9 +744,22 @@ function matchBrokerStockRows(activityRows: BrokerActivityRow[]) {
       continue;
     }
 
+    if (row.code === 'Buy') {
+      const lots = openLots.get(stock) ?? [];
+      const lot: BrokerStockLot = {
+        stock,
+        side: 'Long',
+        openDate: row.activityDate,
+        quantity: row.quantity,
+        remainingQuantity: row.quantity,
+        amount: row.amount,
+        rowNumber: row.rowNumber
+      };
+      openLots.set(stock, [...lots, lot]);
+      continue;
+    }
+
     const lots = openLots.get(stock) ?? [];
-    const closingSide: BrokerLotSide = row.code === 'Sell' ? 'Long' : 'Short';
-    const openingSide: BrokerLotSide = row.code === 'Buy' ? 'Long' : 'Short';
     let remainingQuantity = row.quantity;
 
     for (const lot of lots) {
@@ -791,7 +767,7 @@ function matchBrokerStockRows(activityRows: BrokerActivityRow[]) {
         break;
       }
 
-      if (lot.side !== closingSide || lot.remainingQuantity <= 0) {
+      if (lot.side !== 'Long' || lot.remainingQuantity <= 0) {
         continue;
       }
 
@@ -809,23 +785,8 @@ function matchBrokerStockRows(activityRows: BrokerActivityRow[]) {
         closeAmount: allocateAmount(row.amount, matchedQuantity, row.quantity),
         openRowNumber: lot.rowNumber,
         closeRowNumber: row.rowNumber,
-        openGroupKey: lot.openGroupKey,
-        closeGroupKey: brokerStockGroupKey('close', row.activityDate, stock, lot.side)
+        tradeGroupKey: brokerStockTradeGroupKey(lot.openDate, row.activityDate, stock)
       });
-    }
-
-    if (remainingQuantity > 0) {
-      const lot: BrokerStockLot = {
-        stock,
-        side: openingSide,
-        openDate: row.activityDate,
-        quantity: remainingQuantity,
-        remainingQuantity,
-        amount: allocateAmount(row.amount, remainingQuantity, row.quantity),
-        rowNumber: row.rowNumber,
-        openGroupKey: brokerStockGroupKey('open', row.activityDate, stock, openingSide)
-      };
-      openLots.set(stock, [...lots, lot]);
     }
   }
 
@@ -921,11 +882,8 @@ function stockMatchesToTransactions(matches: BrokerStockMatch[]): MappedTransact
 function mapBrokerActivityToTransactions(rows: string[][], headerRowIndex: number, errors: ImportResult['errors']) {
   const activityRows = parseBrokerActivityRows(rows, headerRowIndex, errors);
   const optionMatches = matchBrokerOptionRows(activityRows, errors);
-  const stockMatches = matchBrokerStockRows(activityRows);
 
-  return [...optionMatchesToTransactions(optionMatches), ...stockMatchesToTransactions(stockMatches)].filter(
-    (mapped) => mapped.transaction.closeDate && mapped.transaction.profit !== null
-  );
+  return optionMatchesToTransactions(optionMatches).filter((mapped) => mapped.transaction.closeDate && mapped.transaction.profit !== null);
 }
 
 async function removeExactDuplicateTransactions() {
@@ -1091,8 +1049,13 @@ async function saveMappedTransaction(input: {
           AND LOWER(COALESCE(strikes, '')) = COALESCE($7, '')
           AND contracts = $8
           AND opening_price IS NOT DISTINCT FROM $9::numeric
-          AND LOWER(COALESCE(broker, '')) = COALESCE($10, '')
-          AND bot_opened = $11
+          AND (
+            close_date IS NOT DISTINCT FROM $10::date
+            OR close_date IS NULL
+            OR $10::date IS NULL
+          )
+          AND LOWER(COALESCE(broker, '')) = COALESCE($11, '')
+          AND bot_opened = $12
           AND source_file_name IS NOT NULL
         )
       ORDER BY (source_row_hash = $1) DESC, manually_edited DESC, updated_at DESC, created_at DESC
@@ -1108,6 +1071,7 @@ async function saveMappedTransaction(input: {
       identity.strikes,
       mapped.transaction.contracts,
       mapped.transaction.openingPrice,
+      mapped.transaction.closeDate,
       identity.broker,
       mapped.transaction.botOpened
     ]

@@ -49,11 +49,15 @@ export function buildStrategyBreakdown(closedRows: TransactionRecord[]): Strateg
       trades: 0,
       wins: 0,
       losses: 0,
-      realizedPnL: 0
+      realizedPnL: 0,
+      latestCloseDate: null
     };
 
     current.trades += 1;
     current.realizedPnL += row.profit ?? 0;
+    if (row.closeDate && (!current.latestCloseDate || row.closeDate > current.latestCloseDate)) {
+      current.latestCloseDate = row.closeDate;
+    }
     if ((row.profit ?? 0) >= 0) {
       current.wins += 1;
     } else {

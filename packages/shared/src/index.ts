@@ -100,6 +100,7 @@ export interface StrategyBreakdownRow {
   wins: number;
   losses: number;
   realizedPnL: number;
+  latestCloseDate: string | null;
 }
 
 export interface StockBreakdownRow {

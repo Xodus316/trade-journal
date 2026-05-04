@@ -17,6 +17,7 @@ interface DashboardPageProps {
 }
 
 type DashboardSection = 'overview' | 'performance' | 'options' | 'breakdowns' | 'calendar' | 'risk' | 'review';
+type StrategySort = 'recent' | 'pnl' | 'trades' | 'name';
 
 const dashboardSections: Array<{ id: DashboardSection; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -26,6 +27,13 @@ const dashboardSections: Array<{ id: DashboardSection; label: string }> = [
   { id: 'calendar', label: 'Calendar' },
   { id: 'risk', label: 'Risk' },
   { id: 'review', label: 'Review' }
+];
+
+const strategySortOptions: Array<{ id: StrategySort; label: string }> = [
+  { id: 'recent', label: 'Recent' },
+  { id: 'pnl', label: 'P&L' },
+  { id: 'trades', label: 'Trades' },
+  { id: 'name', label: 'Name' }
 ];
 
 const timeframes: RealizedTimeframe[] = ['daily', 'weekly', 'monthly', 'yearly'];
@@ -113,6 +121,7 @@ function PerformanceRowsTable({
 export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSelect, onStrategySelect }: DashboardPageProps) {
   const [timeframe, setTimeframe] = useState<RealizedTimeframe>('monthly');
   const [activeSection, setActiveSection] = useState<DashboardSection>('overview');
+  const [strategySort, setStrategySort] = useState<StrategySort>('recent');
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,7 +137,29 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
   }, [filters]);
 
   const realizedRows = analytics?.realizedViews[timeframe] ?? [];
-  const topStrategies = useMemo(() => analytics?.strategyBreakdown.slice(0, 10) ?? [], [analytics]);
+  const strategyRows = useMemo(() => {
+    const rows = analytics?.strategyBreakdown ?? [];
+
+    return [...rows].sort((first, second) => {
+      if (strategySort === 'recent') {
+        return (
+          (second.latestCloseDate ?? '').localeCompare(first.latestCloseDate ?? '') ||
+          second.trades - first.trades ||
+          second.realizedPnL - first.realizedPnL
+        );
+      }
+
+      if (strategySort === 'trades') {
+        return second.trades - first.trades || second.realizedPnL - first.realizedPnL;
+      }
+
+      if (strategySort === 'name') {
+        return `${first.positionSide} ${first.strategyType}`.localeCompare(`${second.positionSide} ${second.strategyType}`);
+      }
+
+      return second.realizedPnL - first.realizedPnL || second.trades - first.trades;
+    });
+  }, [analytics, strategySort]);
   const topStocks = useMemo(() => analytics?.stockBreakdown.slice(0, 10) ?? [], [analytics]);
 
   return (
@@ -364,8 +395,25 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
           {activeSection === 'breakdowns' && (
             <div className="dashboard-layout">
               <section className="panel panel-large">
-                <SectionHeader title="Strategy ranking" subtitle="Grouped by side and strategy type" />
-                <TableShell empty={topStrategies.length === 0}>
+                <div className="panel-header split-panel-header">
+                  <div>
+                    <h3>Strategy ranking</h3>
+                    <span className="muted">Grouped by side and strategy type</span>
+                  </div>
+                  <div className="pill-row" aria-label="Strategy sort">
+                    {strategySortOptions.map((option) => (
+                      <button
+                        className={option.id === strategySort ? 'pill pill-active' : 'pill'}
+                        key={option.id}
+                        onClick={() => setStrategySort(option.id)}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <TableShell empty={strategyRows.length === 0}>
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -373,11 +421,12 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
                         <th>Strategy</th>
                         <th>Trades</th>
                         <th>Wins</th>
+                        <th>Latest</th>
                         <th>Realized P&L</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {topStrategies.map((row) => (
+                      {strategyRows.map((row) => (
                         <tr key={`${row.positionSide}-${row.strategyType}`}>
                           <td>{row.positionSide}</td>
                           <td>
@@ -387,6 +436,7 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
                           </td>
                           <td>{row.trades}</td>
                           <td>{row.wins}</td>
+                          <td>{row.latestCloseDate ?? '—'}</td>
                           <td>{formatCurrency(row.realizedPnL)}</td>
                         </tr>
                       ))}
