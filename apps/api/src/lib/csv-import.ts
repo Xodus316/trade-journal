@@ -182,7 +182,7 @@ function toBoolean(value: string | undefined) {
   return ['true', 'yes', 'y', '1', 'checked'].includes(normalized);
 }
 
-function parseDateCell(value: string | undefined) {
+function parseDateCell(value: string | undefined, referenceDate?: string | null) {
   const normalized = normalizeCell(value);
   if (!normalized || normalized === '-' || normalized.toLowerCase() === 'x') {
     return null;
@@ -192,6 +192,16 @@ function parseDateCell(value: string | undefined) {
   if (monthDayYear) {
     const [, month, day, year] = monthDayYear;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  const monthDay = normalized.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (monthDay && referenceDate && /^\d{4}-\d{2}-\d{2}$/.test(referenceDate)) {
+    const [, month, day] = monthDay;
+    return `${referenceDate.slice(0, 4)}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  if (monthDay) {
+    return 'invalid';
   }
 
   const parsed = new Date(normalized);
@@ -955,8 +965,8 @@ async function removeExactDuplicateTransactions() {
 
 function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportFormat) {
   const dateOpened = parseDateCell(cells[0]);
-  const expiration = parseDateCell(cells[1]);
-  const closeDate = parseDateCell(cells[2]);
+  const expiration = parseDateCell(cells[1], dateOpened === 'invalid' ? null : dateOpened);
+  const closeDate = parseDateCell(cells[2], expiration === 'invalid' ? (dateOpened === 'invalid' ? null : dateOpened) : expiration);
   const contracts = toContractAmount(cells[7]);
   const openingPrice = toNumber(cells[8]);
   const closingPrice = toNumber(cells[9]);
