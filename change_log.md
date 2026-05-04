@@ -2,6 +2,11 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-03 17:07:03 PDT
+
+- Added broker-level realized P&L analytics to the API response.
+- Added a Broker P&L card/table to the dashboard Breakdowns section.
+
 ## 2026-05-03 17:00:28 PDT
 
 - Fixed CSV date parsing for month/day-only cells so close dates like `5/18` inherit the year from expiration/open date instead of parsing as year 2001.

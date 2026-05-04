@@ -961,6 +961,7 @@ export async function getAnalytics(filters: AnalyticsFilters = defaultAnalyticsF
     reviewAnalytics: buildReviewAnalytics(closedRows),
     unsupportedAnalyses: buildUnsupportedAnalyses(),
     botManualBreakdown: buildBotManualBreakdown(closedRows),
+    brokerBreakdown: groupedPerformanceRows(closedRows, (row) => row.broker ?? 'Unknown broker'),
     strategyBreakdown: buildStrategyBreakdown(closedRows),
     stockBreakdown: buildStockBreakdown(closedRows),
     openPositions: openRows

@@ -448,6 +448,11 @@ export function DashboardPage({ filters, onDaySelect, onStockSelect, onStrategyS
                 </TableShell>
               </section>
 
+              <section className="panel">
+                <SectionHeader title="Broker P&L" subtitle="Realized performance by broker" />
+                <PerformanceRowsTable rows={analytics.brokerBreakdown} labelHeader="Broker" />
+              </section>
+
               <section className="panel panel-large">
                 <SectionHeader title="Strategy decay" subtitle="Recent expectancy versus prior expectancy" />
                 <TableShell empty={analytics.strategyDecay.length === 0}>

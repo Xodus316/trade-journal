@@ -333,6 +333,7 @@ export interface AnalyticsResponse {
   reviewAnalytics: ReviewAnalytics;
   unsupportedAnalyses: UnsupportedAnalysis[];
   botManualBreakdown: BotManualRow[];
+  brokerBreakdown: NamedPerformanceRow[];
   strategyBreakdown: StrategyBreakdownRow[];
   stockBreakdown: StockBreakdownRow[];
   openPositions: TransactionRecord[];
