@@ -13,10 +13,14 @@ import type {
   MonthlyPace,
   NamedPerformanceRow,
   OptionAnalytics,
+  OpenRiskSummary,
+  PnlAttribution,
   PositionSizingRow,
   RealizedTimeframe,
   ReviewAnalytics,
   RiskSimulator,
+  RollingPerformancePoint,
+  EquityMilestone,
   RollingExpectancyPoint,
   SetupCombinationRow,
   StreakSummary,
@@ -733,6 +737,200 @@ function buildWhatIfScenarios(closedRows: TransactionRecord[]): WhatIfScenario[]
   return [...strategyScenarios, ...stockScenarios].sort((a, b) => b.delta - a.delta).slice(0, 12);
 }
 
+function getSizeBucket(row: TransactionRecord) {
+  if (row.contracts <= 1) {
+    return '1 contract/share lot';
+  }
+
+  if (row.contracts <= 3) {
+    return '2-3 contracts/shares';
+  }
+
+  if (row.contracts <= 10) {
+    return '4-10 contracts/shares';
+  }
+
+  return '11+ contracts/shares';
+}
+
+function getHoldingPeriodBucket(row: TransactionRecord) {
+  if (!row.closeDate) {
+    return null;
+  }
+
+  const daysHeld = daysBetween(row.dateOpened, row.closeDate);
+  if (daysHeld === 0) {
+    return 'Same day';
+  }
+
+  if (daysHeld <= 7) {
+    return '1-7 days';
+  }
+
+  if (daysHeld <= 30) {
+    return '8-30 days';
+  }
+
+  return '31+ days';
+}
+
+function buildPnlAttribution(closedRows: TransactionRecord[]): PnlAttribution {
+  return {
+    strategies: groupedPerformanceRows(closedRows, (row) => `${row.positionSide} ${row.strategyType}`),
+    stocks: groupedPerformanceRows(closedRows, (row) => row.stock),
+    brokers: groupedPerformanceRows(closedRows, (row) => row.broker ?? 'Unknown broker'),
+    botManual: groupedPerformanceRows(closedRows, (row) => (row.botOpened ? 'Bot' : 'Manual')),
+    dayOfWeek: groupedPerformanceRows(closedRows, (row) => (row.closeDate ? dayLabels[getIsoDay(row.closeDate)] : null)),
+    expirationDay: groupedPerformanceRows(closedRows, (row) => (row.expiration ? dayLabels[getIsoDay(row.expiration)] : null)),
+    dte: groupedPerformanceRows(closedRows, getDteBucket),
+    size: groupedPerformanceRows(closedRows, getSizeBucket),
+    holdingPeriod: groupedPerformanceRows(closedRows, getHoldingPeriodBucket),
+    side: groupedPerformanceRows(closedRows, (row) => row.positionSide)
+  };
+}
+
+function buildRollingPerformance(closedRows: TransactionRecord[]): RollingPerformancePoint[] {
+  const ordered = [...closedRows]
+    .filter((row) => row.closeDate && row.profit !== null)
+    .sort((a, b) => (a.closeDate ?? '').localeCompare(b.closeDate ?? '') || a.createdAt.localeCompare(b.createdAt));
+  const equityByDate = new Map(buildDrawdownCurve(closedRows).map((point) => [point.date, point.drawdown]));
+
+  function windowRows(index: number, days: number) {
+    const currentDate = new Date(`${ordered[index].closeDate}T00:00:00Z`);
+    const startDate = new Date(currentDate);
+    startDate.setUTCDate(startDate.getUTCDate() - days + 1);
+
+    return ordered.slice(0, index + 1).filter((row) => {
+      const closeDate = new Date(`${row.closeDate}T00:00:00Z`);
+      return closeDate >= startDate && closeDate <= currentDate;
+    });
+  }
+
+  function windowPnl(index: number, days: number) {
+    const rows = windowRows(index, days);
+    return rows.length ? round(rows.reduce((sum, row) => sum + (row.profit ?? 0), 0)) : null;
+  }
+
+  return ordered.map((row, index) => {
+    const thirtyDayRows = windowRows(index, 30);
+    const thirtyDayPnL = thirtyDayRows.reduce((sum, trade) => sum + (trade.profit ?? 0), 0);
+    const thirtyDayWins = thirtyDayRows.filter((trade) => (trade.profit ?? 0) >= 0).length;
+
+    return {
+      date: row.closeDate as string,
+      pnl7: windowPnl(index, 7),
+      pnl30: windowPnl(index, 30),
+      pnl90: windowPnl(index, 90),
+      winRate30: thirtyDayRows.length ? round((thirtyDayWins / thirtyDayRows.length) * 100) : null,
+      expectancy30: thirtyDayRows.length ? round(thirtyDayPnL / thirtyDayRows.length) : null,
+      drawdown: equityByDate.get(row.closeDate as string) ?? 0
+    };
+  });
+}
+
+function buildEquityMilestones(closedRows: TransactionRecord[], limit = 8): EquityMilestone[] {
+  const dailyBuckets = toTimeBuckets(closedRows, 'daily');
+  let cumulativePnL = 0;
+  let peak = 0;
+  const milestones: EquityMilestone[] = [];
+
+  for (const bucket of dailyBuckets) {
+    cumulativePnL = round(cumulativePnL + bucket.realizedPnL);
+    if (cumulativePnL > peak) {
+      peak = cumulativePnL;
+      milestones.push({
+        date: bucket.bucket,
+        label: 'New equity high',
+        realizedPnL: bucket.realizedPnL,
+        cumulativePnL,
+        tradeCount: bucket.trades
+      });
+    }
+  }
+
+  const biggestDays = [...dailyBuckets]
+    .sort((a, b) => Math.abs(b.realizedPnL) - Math.abs(a.realizedPnL))
+    .slice(0, limit)
+    .map((bucket) => ({
+      date: bucket.bucket,
+      label: bucket.realizedPnL >= 0 ? 'Largest winning day' : 'Largest losing day',
+      realizedPnL: bucket.realizedPnL,
+      cumulativePnL: 0,
+      tradeCount: bucket.trades
+    }));
+
+  const cumulativeByDate = new Map<string, number>();
+  cumulativePnL = 0;
+  for (const bucket of dailyBuckets) {
+    cumulativePnL = round(cumulativePnL + bucket.realizedPnL);
+    cumulativeByDate.set(bucket.bucket, cumulativePnL);
+  }
+
+  return [...milestones.slice(-limit), ...biggestDays]
+    .map((milestone) => ({ ...milestone, cumulativePnL: cumulativeByDate.get(milestone.date) ?? milestone.cumulativePnL }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, limit);
+}
+
+function estimateOpenRisk(row: TransactionRecord) {
+  if (row.maxRisk !== null) {
+    return Math.abs(row.maxRisk);
+  }
+
+  if (row.stopLoss !== null && row.openingPrice !== null) {
+    return round(Math.abs(row.stopLoss - row.openingPrice) * Math.max(1, row.contracts));
+  }
+
+  if (row.openingPrice !== null) {
+    return round(Math.abs(row.openingPrice) * Math.max(1, row.contracts));
+  }
+
+  return 0;
+}
+
+function buildOpenRisk(openRows: TransactionRecord[]): OpenRiskSummary {
+  const rowsWithRisk = openRows.map((row) => ({ row, risk: estimateOpenRisk(row) }));
+  const largestRisk = rowsWithRisk.sort((a, b) => b.risk - a.risk)[0] ?? null;
+
+  function openRiskPerformance(label: string, rows: TransactionRecord[]): NamedPerformanceRow {
+    const risk = rows.reduce((sum, row) => sum + estimateOpenRisk(row), 0);
+    return {
+      label,
+      trades: rows.length,
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      realizedPnL: round(risk),
+      expectancy: rows.length ? round(risk / rows.length) : 0,
+      profitFactor: 0
+    };
+  }
+
+  function groupOpenRows(getLabel: (row: TransactionRecord) => string | null) {
+    const groups = new Map<string, TransactionRecord[]>();
+    for (const row of openRows) {
+      const label = getLabel(row);
+      if (!label) continue;
+      groups.set(label, [...(groups.get(label) ?? []), row]);
+    }
+    return [...groups.entries()].map(([label, rows]) => openRiskPerformance(label, rows)).sort((a, b) => b.realizedPnL - a.realizedPnL);
+  }
+
+  return {
+    openPositions: openRows.length,
+    totalEstimatedRisk: round(rowsWithRisk.reduce((sum, item) => sum + item.risk, 0)),
+    positionsWithRisk: rowsWithRisk.filter((item) => item.risk > 0).length,
+    earliestExpiration: openRows
+      .map((row) => row.expiration)
+      .filter((expiration): expiration is string => Boolean(expiration))
+      .sort()[0] ?? null,
+    largestRisk: largestRisk?.row ?? null,
+    expirationBuckets: groupOpenRows((row) => row.expiration?.slice(0, 7) ?? 'No expiration'),
+    stockConcentration: groupOpenRows((row) => row.stock),
+    strategyConcentration: groupOpenRows((row) => `${row.positionSide} ${row.strategyType}`)
+  };
+}
+
 function keywordFromText(text: string) {
   return text
     .toLowerCase()
@@ -742,8 +940,11 @@ function keywordFromText(text: string) {
 }
 
 function buildReviewAnalytics(closedRows: TransactionRecord[]): ReviewAnalytics {
-  const reviewedTrades = closedRows.filter((row) => row.reviewNotes || row.lessonLearned || row.exitReason || row.tags.length > 0);
+  const reviewedTrades = closedRows.filter(
+    (row) => row.reviewNotes || row.lessonLearned || row.exitReason || row.tags.length > 0 || row.mistakeTags.length > 0
+  );
   const tagRows = closedRows.flatMap((row) => row.tags.map((tag) => ({ ...row, stock: tag })));
+  const mistakeRows = closedRows.flatMap((row) => row.mistakeTags.map((tag) => ({ ...row, stock: tag })));
   const lessonGroups = new Map<string, TransactionRecord[]>();
 
   for (const row of closedRows) {
@@ -759,6 +960,7 @@ function buildReviewAnalytics(closedRows: TransactionRecord[]): ReviewAnalytics 
     reviewCompletionRate: closedRows.length ? round((reviewedTrades.length / closedRows.length) * 100) : 0,
     missingReviewTrades: closedRows.length - reviewedTrades.length,
     tagBreakdown: groupedPerformanceRows(tagRows, (row) => row.stock),
+    mistakeBreakdown: groupedPerformanceRows(mistakeRows, (row) => row.stock),
     exitReasonBreakdown: groupedPerformanceRows(closedRows, (row) => row.exitReason),
     lessonKeywordBreakdown: [...lessonGroups.entries()]
       .map(([label, rows]) => summarizeNamedGroup(label, rows))
@@ -867,6 +1069,7 @@ async function listAnalyticsRows() {
         broker,
         bot_opened,
         tags,
+        mistake_tags,
         review_notes,
         lesson_learned,
         exit_reason,
@@ -963,6 +1166,10 @@ export async function getAnalytics(filters: AnalyticsFilters = defaultAnalyticsF
     drawdownCurve: buildDrawdownCurve(closedRows),
     monthlyPace: buildMonthlyPace(closedRows),
     whatIfScenarios: buildWhatIfScenarios(closedRows),
+    rollingPerformance: buildRollingPerformance(closedRows),
+    equityMilestones: buildEquityMilestones(closedRows),
+    openRisk: buildOpenRisk(openRows),
+    pnlAttribution: buildPnlAttribution(closedRows),
     reviewAnalytics: buildReviewAnalytics(closedRows),
     unsupportedAnalyses: buildUnsupportedAnalyses(),
     botManualBreakdown: buildBotManualBreakdown(closedRows),

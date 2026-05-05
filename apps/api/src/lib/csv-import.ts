@@ -575,6 +575,7 @@ function makeBaseTransaction(input: {
     broker: 'Robinhood',
     botOpened: false,
     tags: [],
+    mistakeTags: [],
     reviewNotes: null,
     lessonLearned: null,
     exitReason: null,
@@ -1008,6 +1009,7 @@ function mapRowToTransaction(cells: string[], rowNumber: number, format: ImportF
       broker,
       botOpened,
       tags: [],
+      mistakeTags: [],
       reviewNotes: null,
       lessonLearned: null,
       exitReason: null,
@@ -1259,10 +1261,15 @@ export async function importTransactionsCsv(sourceFileName: string, csvText: str
   await query(
     `
       UPDATE import_batches
-      SET row_count = $2, error_count = $3
+      SET
+        row_count = $2,
+        error_count = $3,
+        imported_count = $4,
+        updated_count = $5,
+        skipped_duplicate_count = $6
       WHERE id = $1
     `,
-    [batchId, counters.imported + counters.updated + counters.skippedDuplicates, errors.length]
+    [batchId, counters.imported + counters.updated + counters.skippedDuplicates, errors.length, counters.imported, counters.updated, counters.skippedDuplicates]
   );
 
   await removeExactDuplicateTransactions();

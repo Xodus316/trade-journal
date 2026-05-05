@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { importTransactionsCsv } from '../lib/csv-import.js';
-import { listImportBatches } from '../lib/imports-service.js';
+import { getImportBatchReview, getImportReconciliation, listImportBatches } from '../lib/imports-service.js';
 
 export const importsRouter = Router();
 
@@ -14,6 +14,19 @@ const importSchema = z.object({
 importsRouter.get('/', async (_req, res) => {
   const items = await listImportBatches();
   res.json({ items });
+});
+
+importsRouter.get('/reconciliation', async (_req, res) => {
+  res.json(await getImportReconciliation());
+});
+
+importsRouter.get('/:batchId', async (req, res) => {
+  const review = await getImportBatchReview(req.params.batchId);
+  if (!review) {
+    return res.status(404).json({ message: 'Import batch not found.' });
+  }
+
+  return res.json(review);
 });
 
 importsRouter.post('/', async (req, res) => {

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 
-import type { BackupPayload, ImportBatchRecord, ImportResult } from '@trade-journal/shared';
+import type { BackupPayload, ImportBatchRecord, ImportBatchReviewResponse, ImportReconciliationRow, ImportResult } from '@trade-journal/shared';
 
 import { savedViewsStorageKey } from '../components/FilterBar';
-import { exportBackup, getImportHistory, importTransactions, restoreBackup } from '../lib/api';
+import { exportBackup, getImportBatchReview, getImportHistory, getImportReconciliation, importTransactions, restoreBackup } from '../lib/api';
+import { formatCurrency } from '../lib/format';
 
 type BackupFile = BackupPayload & {
   client?: {
@@ -26,14 +27,22 @@ export function ImportsPage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [history, setHistory] = useState<ImportBatchRecord[]>([]);
+  const [selectedReview, setSelectedReview] = useState<ImportBatchReviewResponse | null>(null);
+  const [reconciliationRows, setReconciliationRows] = useState<ImportReconciliationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
   async function loadHistory() {
-    const response = await getImportHistory();
+    const [response, reconciliation] = await Promise.all([getImportHistory(), getImportReconciliation()]);
     setHistory(response.items);
+    setReconciliationRows(reconciliation.rows);
+  }
+
+  async function loadImportReview(batchId: string) {
+    const review = await getImportBatchReview(batchId);
+    setSelectedReview(review);
   }
 
   useEffect(() => {
@@ -86,6 +95,7 @@ export function ImportsPage() {
                 const importResult = await importTransactions(selectedFile.name, csvText);
                 setResult(importResult);
                 await loadHistory();
+                await loadImportReview(importResult.batchId);
                 setError(null);
               } catch (requestError) {
                 setError(requestError instanceof Error ? requestError.message : 'Import failed.');
@@ -243,6 +253,133 @@ export function ImportsPage() {
         </section>
       )}
 
+      {selectedReview && (
+        <section className="panel upload-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Import review</h3>
+              <span className="muted">{selectedReview.batch.sourceFileName}</span>
+            </div>
+            <span className="status-pill status-open">{new Date(selectedReview.batch.importedAt).toLocaleString()}</span>
+          </div>
+          <div className="metric-list">
+            <div>
+              <span>New / Updated</span>
+              <strong>
+                {selectedReview.batch.importedCount} / {selectedReview.batch.updatedCount}
+              </strong>
+            </div>
+            <div>
+              <span>Skipped / Errors</span>
+              <strong>
+                {selectedReview.batch.skippedDuplicateCount} / {selectedReview.batch.errorCount}
+              </strong>
+            </div>
+            <div>
+              <span>Closed trades</span>
+              <strong>{selectedReview.summary.totalClosedTrades}</strong>
+            </div>
+            <div>
+              <span>Realized P&L</span>
+              <strong>{formatCurrency(selectedReview.summary.realizedPnL)}</strong>
+            </div>
+          </div>
+          <div className="import-review-grid">
+            <section className="subsection-panel">
+              <div className="panel-header">
+                <h3>Broker totals</h3>
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Broker</th>
+                    <th>Trades</th>
+                    <th>P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedReview.brokerBreakdown.slice(0, 8).map((row) => (
+                    <tr key={row.label}>
+                      <td>{row.label}</td>
+                      <td>{row.trades}</td>
+                      <td>{formatCurrency(row.realizedPnL)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+            <section className="subsection-panel">
+              <div className="panel-header">
+                <h3>Top strategies</h3>
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Trades</th>
+                    <th>P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedReview.strategyBreakdown.slice(0, 8).map((row) => (
+                    <tr key={`${row.positionSide}-${row.strategyType}`}>
+                      <td>
+                        {row.positionSide} {row.strategyType}
+                      </td>
+                      <td>{row.trades}</td>
+                      <td>{formatCurrency(row.realizedPnL)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </div>
+        </section>
+      )}
+
+      <section className="panel upload-panel">
+        <div className="panel-header">
+          <h3>P&L reconciliation</h3>
+          <span className="muted">Grouped by source file and broker</span>
+        </div>
+        {reconciliationRows.length === 0 ? (
+          <div className="empty-state compact-empty">No imported trades to reconcile yet.</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Broker</th>
+                <th>Batches</th>
+                <th>New</th>
+                <th>Updated</th>
+                <th>Skipped</th>
+                <th>Errors</th>
+                <th>Closed</th>
+                <th>P&L</th>
+                <th>Fees</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reconciliationRows.map((row) => (
+                <tr key={`${row.sourceFileName}-${row.broker}`}>
+                  <td>{row.sourceFileName}</td>
+                  <td>{row.broker}</td>
+                  <td>{row.batches}</td>
+                  <td>{row.importedRows}</td>
+                  <td>{row.updatedRows}</td>
+                  <td>{row.skippedDuplicateRows}</td>
+                  <td>{row.errorRows}</td>
+                  <td>{row.closedTrades}</td>
+                  <td>{formatCurrency(row.realizedPnL)}</td>
+                  <td>{formatCurrency(row.fees)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       <section className="panel upload-panel">
         <div className="panel-header">
           <h3>Import history</h3>
@@ -271,6 +408,7 @@ export function ImportsPage() {
                 <th>File</th>
                 <th>Rows</th>
                 <th>Errors</th>
+                <th>Review</th>
               </tr>
             </thead>
             <tbody>
@@ -280,6 +418,22 @@ export function ImportsPage() {
                   <td>{batch.sourceFileName}</td>
                   <td>{batch.rowCount}</td>
                   <td>{batch.errorCount}</td>
+                  <td>
+                    <button
+                      className="table-link"
+                      onClick={async () => {
+                        try {
+                          await loadImportReview(batch.id);
+                          setError(null);
+                        } catch (requestError) {
+                          setError(requestError instanceof Error ? requestError.message : 'Failed to load import review.');
+                        }
+                      }}
+                      type="button"
+                    >
+                      Open
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

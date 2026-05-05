@@ -32,6 +32,7 @@ export interface TransactionRecord {
   broker: string | null;
   botOpened: boolean;
   tags: string[];
+  mistakeTags: string[];
   reviewNotes: string | null;
   lessonLearned: string | null;
   exitReason: string | null;
@@ -67,6 +68,7 @@ export interface TransactionInput {
   broker: string | null;
   botOpened: boolean;
   tags: string[];
+  mistakeTags: string[];
   reviewNotes: string | null;
   lessonLearned: string | null;
   exitReason: string | null;
@@ -274,12 +276,55 @@ export interface WhatIfScenario {
   delta: number;
 }
 
+export interface RollingPerformancePoint {
+  date: string;
+  pnl7: number | null;
+  pnl30: number | null;
+  pnl90: number | null;
+  winRate30: number | null;
+  expectancy30: number | null;
+  drawdown: number;
+}
+
+export interface EquityMilestone {
+  date: string;
+  label: string;
+  realizedPnL: number;
+  cumulativePnL: number;
+  tradeCount: number;
+}
+
+export interface OpenRiskSummary {
+  openPositions: number;
+  totalEstimatedRisk: number;
+  positionsWithRisk: number;
+  earliestExpiration: string | null;
+  largestRisk: TransactionRecord | null;
+  expirationBuckets: NamedPerformanceRow[];
+  stockConcentration: NamedPerformanceRow[];
+  strategyConcentration: NamedPerformanceRow[];
+}
+
+export interface PnlAttribution {
+  strategies: NamedPerformanceRow[];
+  stocks: NamedPerformanceRow[];
+  brokers: NamedPerformanceRow[];
+  botManual: NamedPerformanceRow[];
+  dayOfWeek: NamedPerformanceRow[];
+  expirationDay: NamedPerformanceRow[];
+  dte: NamedPerformanceRow[];
+  size: NamedPerformanceRow[];
+  holdingPeriod: NamedPerformanceRow[];
+  side: NamedPerformanceRow[];
+}
+
 export interface ReviewAnalytics {
   totalClosedTrades: number;
   reviewedTrades: number;
   reviewCompletionRate: number;
   missingReviewTrades: number;
   tagBreakdown: NamedPerformanceRow[];
+  mistakeBreakdown: NamedPerformanceRow[];
   exitReasonBreakdown: NamedPerformanceRow[];
   lessonKeywordBreakdown: NamedPerformanceRow[];
   missingChartOrReviewNote: number;
@@ -331,6 +376,10 @@ export interface AnalyticsResponse {
   drawdownCurve: DrawdownPoint[];
   monthlyPace: MonthlyPace;
   whatIfScenarios: WhatIfScenario[];
+  rollingPerformance: RollingPerformancePoint[];
+  equityMilestones: EquityMilestone[];
+  openRisk: OpenRiskSummary;
+  pnlAttribution: PnlAttribution;
   reviewAnalytics: ReviewAnalytics;
   unsupportedAnalyses: UnsupportedAnalysis[];
   botManualBreakdown: BotManualRow[];
@@ -378,6 +427,9 @@ export interface ImportBatchRecord {
   importedAt: string;
   rowCount: number;
   errorCount: number;
+  importedCount: number;
+  updatedCount: number;
+  skippedDuplicateCount: number;
 }
 
 export interface ImportHistoryResponse {
@@ -388,6 +440,11 @@ export interface DailyReview {
   reviewDate: string;
   notes: string | null;
   chartImageDataUrl: string | null;
+  whatWentWell: string | null;
+  whatWentPoorly: string | null;
+  lessonLearned: string | null;
+  mood: string | null;
+  disciplineScore: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -395,6 +452,11 @@ export interface DailyReview {
 export interface DailyReviewInput {
   notes: string | null;
   chartImageDataUrl: string | null;
+  whatWentWell: string | null;
+  whatWentPoorly: string | null;
+  lessonLearned: string | null;
+  mood: string | null;
+  disciplineScore: number | null;
 }
 
 export interface DailyReviewResponse {
@@ -464,4 +526,34 @@ export interface ImportResult {
   updated: number;
   skippedDuplicates: number;
   errors: ImportRowError[];
+}
+
+export interface ImportBatchReviewResponse {
+  batch: ImportBatchRecord;
+  summary: SummaryMetric;
+  brokerBreakdown: NamedPerformanceRow[];
+  strategyBreakdown: StrategyBreakdownRow[];
+  stockBreakdown: StockBreakdownRow[];
+  trades: TransactionRecord[];
+}
+
+export interface ImportReconciliationRow {
+  sourceFileName: string;
+  broker: string;
+  batches: number;
+  importedRows: number;
+  updatedRows: number;
+  skippedDuplicateRows: number;
+  errorRows: number;
+  tradeCount: number;
+  closedTrades: number;
+  openTrades: number;
+  realizedPnL: number;
+  fees: number;
+  firstImportedAt: string | null;
+  lastImportedAt: string | null;
+}
+
+export interface ImportReconciliationResponse {
+  rows: ImportReconciliationRow[];
 }

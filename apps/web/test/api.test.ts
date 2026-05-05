@@ -13,7 +13,9 @@ import {
   getAnalytics,
   getBrokerAnalytics,
   getDailyReview,
+  getImportBatchReview,
   getImportHistory,
+  getImportReconciliation,
   getOpenPositions,
   getPositionGroup,
   getPositionGroups,
@@ -54,6 +56,7 @@ const transactionInput: TransactionInput = {
   broker: null,
   botOpened: false,
   tags: ['followed-plan'],
+  mistakeTags: ['late-exit'],
   reviewNotes: 'Good entry.',
   lessonLearned: 'Scale out earlier.',
   exitReason: 'Target',
@@ -168,6 +171,7 @@ describe('API client GET calls', () => {
       ['/positions', getPositionGroups],
       ['/transactions/open', getOpenPositions],
       ['/imports', getImportHistory],
+      ['/imports/reconciliation', getImportReconciliation],
       ['/backup', exportBackup]
     ];
 
@@ -195,6 +199,14 @@ describe('API client GET calls', () => {
     await getDailyReview('2026-04-20');
 
     assert.equal(latestCall().url, 'http://localhost:4000/daily-reviews/2026-04-20');
+  });
+
+  it('calls an import batch review endpoint with encoded ids', async () => {
+    mockFetch({ batch: { id: 'batch/1' } });
+
+    await getImportBatchReview('batch/1');
+
+    assert.equal(latestCall().url, 'http://localhost:4000/imports/batch%2F1');
   });
 });
 
@@ -282,7 +294,12 @@ describe('API client mutation calls', () => {
 
     await saveDailyReview('2026-04-20', {
       notes: 'Range day. Good patience.',
-      chartImageDataUrl: 'data:image/png;base64,abc123'
+      chartImageDataUrl: 'data:image/png;base64,abc123',
+      whatWentWell: 'Waited for setup.',
+      whatWentPoorly: 'Exited one trade too late.',
+      lessonLearned: 'Scale out earlier.',
+      mood: 'Calm',
+      disciplineScore: 8
     });
 
     const call = latestCall();
@@ -290,7 +307,12 @@ describe('API client mutation calls', () => {
     assert.equal(call.init?.method, 'PUT');
     assert.deepEqual(parsedBody(call), {
       notes: 'Range day. Good patience.',
-      chartImageDataUrl: 'data:image/png;base64,abc123'
+      chartImageDataUrl: 'data:image/png;base64,abc123',
+      whatWentWell: 'Waited for setup.',
+      whatWentPoorly: 'Exited one trade too late.',
+      lessonLearned: 'Scale out earlier.',
+      mood: 'Calm',
+      disciplineScore: 8
     });
   });
 

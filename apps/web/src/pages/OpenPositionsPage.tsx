@@ -25,6 +25,23 @@ export function OpenPositionsPage({ filters }: OpenPositionsPageProps) {
       });
   }, []);
 
+  const filteredPositions = filterTransactions(positions, { ...filters, status: 'open' });
+  const estimatedRisk = filteredPositions.reduce((sum, position) => {
+    if (position.maxRisk !== null) {
+      return sum + Math.abs(position.maxRisk);
+    }
+
+    if (position.openingPrice !== null) {
+      return sum + Math.abs(position.openingPrice) * Math.max(1, position.contracts);
+    }
+
+    return sum;
+  }, 0);
+  const expirationDates = filteredPositions
+    .map((position) => position.expiration)
+    .filter((expiration): expiration is string => Boolean(expiration))
+    .sort();
+
   return (
     <section className="page">
       <header className="page-header">
@@ -36,11 +53,32 @@ export function OpenPositionsPage({ filters }: OpenPositionsPageProps) {
 
       {error && <div className="error-banner">{error}</div>}
 
-      {filterTransactions(positions, { ...filters, status: 'open' }).length === 0 && !error ? (
+      {filteredPositions.length > 0 && (
+        <div className="card-grid">
+          <article className="stat-card">
+            <span>Open Positions</span>
+            <strong>{filteredPositions.length}</strong>
+          </article>
+          <article className="stat-card">
+            <span>Estimated Risk</span>
+            <strong>{formatCurrency(estimatedRisk)}</strong>
+          </article>
+          <article className="stat-card">
+            <span>Earliest Expiration</span>
+            <strong>{expirationDates[0] ?? '—'}</strong>
+          </article>
+          <article className="stat-card">
+            <span>Symbols</span>
+            <strong>{new Set(filteredPositions.map((position) => position.stock)).size}</strong>
+          </article>
+        </div>
+      )}
+
+      {filteredPositions.length === 0 && !error ? (
         <div className="empty-state">No open positions right now.</div>
       ) : (
         <div className="panel-grid">
-          {filterTransactions(positions, { ...filters, status: 'open' }).map((position) => (
+          {filteredPositions.map((position) => (
             <article className="panel" key={position.id}>
               <div className="panel-header">
                 <div>
@@ -71,6 +109,10 @@ export function OpenPositionsPage({ filters }: OpenPositionsPageProps) {
                 <div>
                   <dt>Opening price</dt>
                   <dd>{formatCurrency(position.openingPrice)}</dd>
+                </div>
+                <div>
+                  <dt>Estimated risk</dt>
+                  <dd>{formatCurrency(position.maxRisk ?? (position.openingPrice === null ? null : Math.abs(position.openingPrice) * Math.max(1, position.contracts)))}</dd>
                 </div>
                 <div>
                   <dt>Notes</dt>

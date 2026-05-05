@@ -23,6 +23,7 @@ export interface TransactionRow {
   broker: string | null;
   bot_opened: boolean;
   tags: string[] | null;
+  mistake_tags: string[] | null;
   review_notes: string | null;
   lesson_learned: string | null;
   exit_reason: string | null;
@@ -82,6 +83,7 @@ export function mapTransactionRow(row: TransactionRow): TransactionRecord {
     broker: row.broker,
     botOpened: row.bot_opened,
     tags: row.tags ?? [],
+    mistakeTags: row.mistake_tags ?? [],
     reviewNotes: row.review_notes,
     lessonLearned: row.lesson_learned,
     exitReason: row.exit_reason,

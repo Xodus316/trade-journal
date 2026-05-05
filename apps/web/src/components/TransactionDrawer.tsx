@@ -29,6 +29,9 @@ const commonStrategies = [
   'Future'
 ];
 
+const qualityTagPresets = ['A+ setup', 'Followed plan', 'Planned', 'Closed early', 'Oversized'];
+const mistakeTagPresets = ['Chased', 'Revenge trade', 'Oversized', 'Ignored stop', 'Late entry', 'No plan'];
+
 function toNumberOrNull(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -53,6 +56,10 @@ function textToTags(value: string) {
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function toggleTag(tags: string[], tag: string) {
+  return tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag];
 }
 
 export function TransactionDrawer({
@@ -296,6 +303,48 @@ export function TransactionDrawer({
               placeholder="Rolled, Closed Early, Plan Followed"
             />
           </label>
+
+          <div className="full-width compact-chip-group">
+            <span className="muted">Quality tags</span>
+            <div className="pill-row">
+              {qualityTagPresets.map((tag) => (
+                <button
+                  className={form.tags.includes(tag) ? 'pill pill-active' : 'pill'}
+                  key={tag}
+                  onClick={() => setForm((current) => ({ ...current, tags: toggleTag(current.tags, tag) }))}
+                  type="button"
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label>
+            <span>Mistakes</span>
+            <input
+              type="text"
+              value={tagsToText(form.mistakeTags)}
+              onChange={(event) => setForm((current) => ({ ...current, mistakeTags: textToTags(event.target.value) }))}
+              placeholder="Chased, Oversized, Ignored stop"
+            />
+          </label>
+
+          <div className="full-width compact-chip-group">
+            <span className="muted">Mistake tags</span>
+            <div className="pill-row">
+              {mistakeTagPresets.map((tag) => (
+                <button
+                  className={form.mistakeTags.includes(tag) ? 'pill pill-active' : 'pill'}
+                  key={tag}
+                  onClick={() => setForm((current) => ({ ...current, mistakeTags: toggleTag(current.mistakeTags, tag) }))}
+                  type="button"
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <label>
             <span>Exit reason</span>

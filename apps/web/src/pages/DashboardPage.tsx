@@ -360,6 +360,64 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
                   />
                 )}
               </section>
+
+              <section className="panel panel-large">
+                <SectionHeader title="Rolling performance" subtitle="7, 30, and 90 day realized P&L" />
+                <TableShell empty={analytics.rollingPerformance.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>7D P&L</th>
+                        <th>30D P&L</th>
+                        <th>90D P&L</th>
+                        <th>30D Win Rate</th>
+                        <th>30D Expectancy</th>
+                        <th>Drawdown</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.rollingPerformance.slice(-12).reverse().map((row) => (
+                        <tr key={row.date}>
+                          <td>{row.date}</td>
+                          <td>{formatCurrency(row.pnl7)}</td>
+                          <td>{formatCurrency(row.pnl30)}</td>
+                          <td>{formatCurrency(row.pnl90)}</td>
+                          <td>{row.winRate30 === null ? '—' : formatPercent(row.winRate30)}</td>
+                          <td>{formatCurrency(row.expectancy30)}</td>
+                          <td>{formatCurrency(row.drawdown)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Equity milestones" subtitle="Recent highs and biggest P&L days" />
+                <TableShell empty={analytics.equityMilestones.length === 0}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Event</th>
+                        <th>Daily P&L</th>
+                        <th>Equity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.equityMilestones.map((row) => (
+                        <tr key={`${row.date}-${row.label}`}>
+                          <td>{row.date}</td>
+                          <td>{row.label}</td>
+                          <td>{formatCurrency(row.realizedPnL)}</td>
+                          <td>{formatCurrency(row.cumulativePnL)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
+              </section>
             </div>
           )}
 
@@ -532,6 +590,28 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
               </section>
 
               <section className="panel panel-large">
+                <SectionHeader title="P&L attribution" subtitle="Major contributors across strategy, stock, DTE, size, and duration" />
+                <div className="attribution-grid">
+                  <div>
+                    <h4>By DTE</h4>
+                    <PerformanceRowsTable rows={analytics.pnlAttribution.dte} labelHeader="DTE" />
+                  </div>
+                  <div>
+                    <h4>By holding period</h4>
+                    <PerformanceRowsTable rows={analytics.pnlAttribution.holdingPeriod} labelHeader="Period" />
+                  </div>
+                  <div>
+                    <h4>By size</h4>
+                    <PerformanceRowsTable rows={analytics.pnlAttribution.size} labelHeader="Size" />
+                  </div>
+                  <div>
+                    <h4>By side</h4>
+                    <PerformanceRowsTable rows={analytics.pnlAttribution.side} labelHeader="Side" />
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel panel-large">
                 <SectionHeader title="Strategy decay" subtitle="Recent expectancy versus prior expectancy" />
                 <TableShell empty={analytics.strategyDecay.length === 0}>
                   <table className="data-table">
@@ -621,6 +701,24 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
 
           {activeSection === 'risk' && (
             <div className="dashboard-layout">
+              <section className="panel">
+                <SectionHeader title="Open position risk" subtitle="Estimated exposure from open positions" />
+                <CompactMetricList
+                  rows={[
+                    { label: 'Open positions', value: String(analytics.openRisk.openPositions) },
+                    { label: 'Estimated risk', value: formatCurrency(analytics.openRisk.totalEstimatedRisk) },
+                    { label: 'Positions with risk', value: String(analytics.openRisk.positionsWithRisk) },
+                    { label: 'Earliest expiration', value: analytics.openRisk.earliestExpiration ?? '—' },
+                    {
+                      label: 'Largest risk',
+                      value: analytics.openRisk.largestRisk
+                        ? `${analytics.openRisk.largestRisk.stock} ${formatCurrency(analytics.openRisk.largestRisk.maxRisk ?? analytics.openRisk.largestRisk.openingPrice ?? 0)}`
+                        : '—'
+                    }
+                  ]}
+                />
+              </section>
+
               <section className="panel">
                 <SectionHeader title="Consistency score" subtitle="Win rate, expectancy, drawdown, and profit factor" />
                 <div className="mini-stat-grid">
@@ -850,6 +948,11 @@ export function DashboardPage({ filters, onDaySelect, onBrokerSelect, onStockSel
               <section className="panel">
                 <SectionHeader title="Mistake and tag analytics" subtitle="Performance by trade tags" />
                 <PerformanceRowsTable rows={analytics.reviewAnalytics.tagBreakdown} labelHeader="Tag" />
+              </section>
+
+              <section className="panel">
+                <SectionHeader title="Mistake tracking" subtitle="Performance by structured mistake tags" />
+                <PerformanceRowsTable rows={analytics.reviewAnalytics.mistakeBreakdown} labelHeader="Mistake" />
               </section>
 
               <section className="panel">

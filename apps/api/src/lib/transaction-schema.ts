@@ -31,6 +31,7 @@ export const transactionInputSchema = z.object({
   broker: nullableTrimmedString,
   botOpened: z.boolean(),
   tags: z.array(z.string()).default([]),
+  mistakeTags: z.array(z.string()).default([]),
   reviewNotes: nullableTrimmedString,
   lessonLearned: nullableTrimmedString,
   exitReason: nullableTrimmedString,

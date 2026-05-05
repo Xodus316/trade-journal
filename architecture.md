@@ -52,7 +52,7 @@ Route modules:
 - `routes/health.ts`: database health check
 - `routes/transactions.ts`: list, create, update, delete transactions and open positions
 - `routes/analytics.ts`: dashboard, stock, and strategy analytics
-- `routes/imports.ts`: CSV import and import history
+- `routes/imports.ts`: CSV import, import history, batch review, and reconciliation
 - `routes/positions.ts`: grouped position lifecycle endpoints
 - `routes/daily-reviews.ts`: calendar-day review read/write
 - `routes/cleanup.ts`: strategy/stock rename and position group assignment
@@ -64,7 +64,7 @@ Service modules:
 - `lib/analytics-service.ts`: P&L summaries, time buckets, drawdown, diagnostics, rankings
 - `lib/transactions-service.ts`: transaction CRUD
 - `lib/positions-service.ts`: position grouping and lifecycle analytics
-- `lib/daily-reviews-service.ts`: day-level notes and chart images
+- `lib/daily-reviews-service.ts`: day-level workflow reviews and chart images
 - `lib/backup-service.ts`: full JSON export/restore
 - `lib/migrations.ts`: lightweight startup schema additions
 - `lib/db.ts`: PostgreSQL pool and query helper
@@ -76,13 +76,13 @@ Initial schema is in `docker/postgres/init.sql`. Startup migrations in `apps/api
 Main tables:
 
 - `transactions`: imported and manually created trades
-- `import_batches`: CSV import history
-- `daily_reviews`: per-day notes and chart image data URLs
+- `import_batches`: CSV import history, inserted/updated/skipped counts, and error totals
+- `daily_reviews`: per-day notes, chart image data URLs, process review fields, mood, and discipline score
 
 Important transaction fields:
 
 - Imported trade fields: open date, expiration, close date, stock, side, strategy, strikes, contracts, prices, fees, profit, win/loss, bot/manual, notes
-- Review fields: tags, review notes, lesson learned, exit reason
+- Review fields: quality tags, mistake tags, review notes, lesson learned, exit reason
 - Risk fields: profit target, stop loss, max risk
 - Grouping fields: position group and derived position-group fallback
 
@@ -173,4 +173,3 @@ npm run build
 docker compose up -d --build api web
 curl -I http://127.0.0.1:5173
 ```
-

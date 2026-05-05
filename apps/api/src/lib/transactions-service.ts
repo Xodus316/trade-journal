@@ -27,6 +27,7 @@ const baseSelect = `
     broker,
     bot_opened,
     tags,
+    mistake_tags,
     review_notes,
     lesson_learned,
     exit_reason,
@@ -99,6 +100,7 @@ export async function createTransaction(input: TransactionInput) {
         broker,
         bot_opened,
         tags,
+        mistake_tags,
         review_notes,
         lesson_learned,
         exit_reason,
@@ -109,7 +111,7 @@ export async function createTransaction(input: TransactionInput) {
       )
       VALUES (
         $1, NULL, $2, NULL, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, $11,
-        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
       )
       RETURNING *
     `,
@@ -134,6 +136,7 @@ export async function createTransaction(input: TransactionInput) {
       input.broker,
       input.botOpened,
       input.tags,
+      input.mistakeTags,
       input.reviewNotes,
       input.lessonLearned,
       input.exitReason,
@@ -170,13 +173,14 @@ export async function updateTransaction(id: string, input: TransactionInput) {
         broker = $17,
         bot_opened = $18,
         tags = $19,
-        review_notes = $20,
-        lesson_learned = $21,
-        exit_reason = $22,
-        profit_target = $23,
-        stop_loss = $24,
-        max_risk = $25,
-        notes = $26,
+        mistake_tags = $20,
+        review_notes = $21,
+        lesson_learned = $22,
+        exit_reason = $23,
+        profit_target = $24,
+        stop_loss = $25,
+        max_risk = $26,
+        notes = $27,
         manually_edited = TRUE,
         manually_edited_at = NOW(),
         updated_at = NOW()
@@ -203,6 +207,7 @@ export async function updateTransaction(id: string, input: TransactionInput) {
       input.broker,
       input.botOpened,
       input.tags,
+      input.mistakeTags,
       input.reviewNotes,
       input.lessonLearned,
       input.exitReason,

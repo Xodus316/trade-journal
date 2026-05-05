@@ -3,7 +3,10 @@ CREATE TABLE IF NOT EXISTS import_batches (
   source_file_name TEXT NOT NULL,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   row_count INTEGER NOT NULL DEFAULT 0,
-  error_count INTEGER NOT NULL DEFAULT 0
+  error_count INTEGER NOT NULL DEFAULT 0,
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  skipped_duplicate_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -29,6 +32,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   broker TEXT,
   bot_opened BOOLEAN NOT NULL DEFAULT FALSE,
   tags TEXT[] NOT NULL DEFAULT '{}',
+  mistake_tags TEXT[] NOT NULL DEFAULT '{}',
   review_notes TEXT,
   lesson_learned TEXT,
   exit_reason TEXT,
@@ -59,6 +63,11 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
   review_date DATE PRIMARY KEY,
   notes TEXT,
   chart_image_data_url TEXT,
+  what_went_well TEXT,
+  what_went_poorly TEXT,
+  lesson_learned TEXT,
+  mood TEXT,
+  discipline_score INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

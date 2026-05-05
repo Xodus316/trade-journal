@@ -2,6 +2,13 @@
 
 All notable changes to Trade Journal should be recorded here. Future agents must update this file whenever they modify code, configuration, schema, tests, or documentation.
 
+## 2026-05-04 17:15:07 PDT
+
+- Added import review and P&L reconciliation endpoints/UI showing batch counts, broker totals, strategy totals, skipped rows, errors, and realized P&L by source file and broker.
+- Added structured mistake tags to transactions, quick quality/mistake tag controls, mistake analytics, and similar historical trades on trade detail pages.
+- Expanded daily reviews with mood, discipline score, what went well, what went poorly, and lesson fields.
+- Added open position risk, P&L attribution, rolling performance, and equity milestone analytics to the dashboard and open positions view.
+
 ## 2026-05-03 23:09:21 PDT
 
 - Added latest close date tracking to strategy breakdown analytics.

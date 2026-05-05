@@ -8,6 +8,11 @@ interface DailyReviewRow {
   review_date: string | Date;
   notes: string | null;
   chart_image_data_url: string | null;
+  what_went_well: string | null;
+  what_went_poorly: string | null;
+  lesson_learned: string | null;
+  mood: string | null;
+  discipline_score: string | number | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -25,6 +30,11 @@ function mapDailyReviewRow(row: DailyReviewRow): DailyReview {
     reviewDate: toDateString(row.review_date),
     notes: row.notes,
     chartImageDataUrl: row.chart_image_data_url,
+    whatWentWell: row.what_went_well,
+    whatWentPoorly: row.what_went_poorly,
+    lessonLearned: row.lesson_learned,
+    mood: row.mood,
+    disciplineScore: row.discipline_score === null ? null : Number(row.discipline_score),
     createdAt: toTimestamp(row.created_at),
     updatedAt: toTimestamp(row.updated_at)
   };
@@ -52,6 +62,7 @@ const transactionSelect = `
     broker,
     bot_opened,
     tags,
+    mistake_tags,
     review_notes,
     lesson_learned,
     exit_reason,
@@ -90,16 +101,39 @@ export async function getDailyReview(reviewDate: string): Promise<DailyReviewRes
 export async function saveDailyReview(reviewDate: string, input: DailyReviewInput): Promise<DailyReview> {
   const result = await query<DailyReviewRow>(
     `
-      INSERT INTO daily_reviews (review_date, notes, chart_image_data_url)
-      VALUES ($1, $2, $3)
+      INSERT INTO daily_reviews (
+        review_date,
+        notes,
+        chart_image_data_url,
+        what_went_well,
+        what_went_poorly,
+        lesson_learned,
+        mood,
+        discipline_score
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (review_date)
       DO UPDATE SET
         notes = EXCLUDED.notes,
         chart_image_data_url = EXCLUDED.chart_image_data_url,
+        what_went_well = EXCLUDED.what_went_well,
+        what_went_poorly = EXCLUDED.what_went_poorly,
+        lesson_learned = EXCLUDED.lesson_learned,
+        mood = EXCLUDED.mood,
+        discipline_score = EXCLUDED.discipline_score,
         updated_at = NOW()
       RETURNING *
     `,
-    [reviewDate, input.notes, input.chartImageDataUrl]
+    [
+      reviewDate,
+      input.notes,
+      input.chartImageDataUrl,
+      input.whatWentWell,
+      input.whatWentPoorly,
+      input.lessonLearned,
+      input.mood,
+      input.disciplineScore
+    ]
   );
 
   return mapDailyReviewRow(result.rows[0]);

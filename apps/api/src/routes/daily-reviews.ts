@@ -8,7 +8,12 @@ export const dailyReviewsRouter = Router();
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const dailyReviewSchema = z.object({
   notes: z.string().nullable(),
-  chartImageDataUrl: z.string().nullable()
+  chartImageDataUrl: z.string().nullable(),
+  whatWentWell: z.string().nullable(),
+  whatWentPoorly: z.string().nullable(),
+  lessonLearned: z.string().nullable(),
+  mood: z.string().nullable(),
+  disciplineScore: z.number().min(1).max(10).nullable()
 });
 
 dailyReviewsRouter.get('/:date', async (req, res) => {

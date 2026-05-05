@@ -8,7 +8,9 @@ import type {
   DailyReview,
   DailyReviewInput,
   DailyReviewResponse,
+  ImportBatchReviewResponse,
   ImportHistoryResponse,
+  ImportReconciliationResponse,
   ImportResult,
   PositionGroupDetail,
   PositionGroupsResponse,
@@ -195,4 +197,12 @@ export function importTransactions(fileName: string, csvText: string) {
 
 export function getImportHistory() {
   return requestJson<ImportHistoryResponse>('/imports');
+}
+
+export function getImportBatchReview(batchId: string) {
+  return requestJson<ImportBatchReviewResponse>(`/imports/${encodeURIComponent(batchId)}`);
+}
+
+export function getImportReconciliation() {
+  return requestJson<ImportReconciliationResponse>('/imports/reconciliation');
 }

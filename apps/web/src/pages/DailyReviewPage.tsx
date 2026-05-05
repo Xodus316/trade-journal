@@ -24,6 +24,11 @@ export function DailyReviewPage({ date, onBack, onTradeSelect }: DailyReviewPage
   const [payload, setPayload] = useState<DailyReviewResponse | null>(null);
   const [notes, setNotes] = useState('');
   const [chartImageDataUrl, setChartImageDataUrl] = useState<string | null>(null);
+  const [whatWentWell, setWhatWentWell] = useState('');
+  const [whatWentPoorly, setWhatWentPoorly] = useState('');
+  const [lessonLearned, setLessonLearned] = useState('');
+  const [mood, setMood] = useState('');
+  const [disciplineScore, setDisciplineScore] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -33,6 +38,11 @@ export function DailyReviewPage({ date, onBack, onTradeSelect }: DailyReviewPage
         setPayload(response);
         setNotes(response.review?.notes ?? '');
         setChartImageDataUrl(response.review?.chartImageDataUrl ?? null);
+        setWhatWentWell(response.review?.whatWentWell ?? '');
+        setWhatWentPoorly(response.review?.whatWentPoorly ?? '');
+        setLessonLearned(response.review?.lessonLearned ?? '');
+        setMood(response.review?.mood ?? '');
+        setDisciplineScore(response.review?.disciplineScore ?? null);
         setError(null);
       })
       .catch((requestError: Error) => setError(requestError.message));
@@ -42,7 +52,12 @@ export function DailyReviewPage({ date, onBack, onTradeSelect }: DailyReviewPage
     try {
       const review = await saveDailyReview(date, {
         notes: notes.trim() || null,
-        chartImageDataUrl
+        chartImageDataUrl,
+        whatWentWell: whatWentWell.trim() || null,
+        whatWentPoorly: whatWentPoorly.trim() || null,
+        lessonLearned: lessonLearned.trim() || null,
+        mood: mood.trim() || null,
+        disciplineScore
       });
       setPayload((current) => (current ? { ...current, review } : current));
       setMessage('Daily review saved.');
@@ -122,15 +137,61 @@ export function DailyReviewPage({ date, onBack, onTradeSelect }: DailyReviewPage
 
             <section className="panel">
               <div className="panel-header">
-                <h3>Daily notes</h3>
-                <span className="muted">Review, mistakes, and lessons</span>
+                <h3>Review workflow</h3>
+                <span className="muted">Process, mistakes, discipline, and lessons</span>
               </div>
+              <div className="form-grid compact-form-grid">
+                <label>
+                  <span>Mood</span>
+                  <input value={mood} onChange={(event) => setMood(event.target.value)} placeholder="Calm, rushed, patient" />
+                </label>
+                <label>
+                  <span>Discipline</span>
+                  <input
+                    max={10}
+                    min={1}
+                    type="number"
+                    value={disciplineScore ?? ''}
+                    onChange={(event) => setDisciplineScore(event.target.value ? Number(event.target.value) : null)}
+                  />
+                </label>
+              </div>
+              <label className="stacked-field">
+                <span>What went well</span>
+                <textarea
+                  className="review-textarea compact-textarea"
+                  rows={4}
+                  value={whatWentWell}
+                  onChange={(event) => setWhatWentWell(event.target.value)}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>What went poorly</span>
+                <textarea
+                  className="review-textarea compact-textarea"
+                  rows={4}
+                  value={whatWentPoorly}
+                  onChange={(event) => setWhatWentPoorly(event.target.value)}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>Lesson</span>
+                <textarea
+                  className="review-textarea compact-textarea"
+                  rows={3}
+                  value={lessonLearned}
+                  onChange={(event) => setLessonLearned(event.target.value)}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>Notes</span>
               <textarea
                 className="review-textarea"
-                rows={12}
+                  rows={5}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
               />
+              </label>
               <div className="toolbar">
                 <button className="primary-button" onClick={saveReview} type="button">
                   Save Review
